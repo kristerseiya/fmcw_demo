@@ -1,0 +1,421 @@
+{
+    "sin_2e7_300_2": {
+        "T": 1.0e-6,
+        "B": 1e8,
+        "linewidth": 1.0e5,
+        "sample_rate": 2.0e8,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-4,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "sinusoidal",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "tri_2e7_1500_3": {
+        "T": 5.0e-6,
+        "B": 6e7,
+        "linewidth": 1.0e5,
+        "sample_rate": 4.0e7,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-2,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "triangle",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "tri_2e7_699_3": {
+        "T": 2.33e-6,
+        "B": 6e7,
+        "linewidth": 1.0e5,
+        "sample_rate": 4.0e7,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-2,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "triangle",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "tri_2e7_480_3": {
+        "T": 1.6e-6,
+        "B": 6e7,
+        "linewidth": 1.0e5,
+        "sample_rate": 4.0e7,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-2,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "triangle",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "tri_2e7_450_3": {
+        "T": 1.5e-6,
+        "B": 6e7,
+        "linewidth": 1.0e5,
+        "sample_rate": 4.0e7,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-2,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "triangle",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "tri_2e7_450_4": {
+        "T": 1.5e-6,
+        "B": 8e7,
+        "linewidth": 1.0e5,
+        "sample_rate": 4.0e7,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-2,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "triangle",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "sin_2e7_3000_10": {
+        "T": 10e-6,
+        "B": 2e8,
+        "linewidth": 1.0e6,
+        "sample_rate": 2.0e7,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-4,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "sinusoidal",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "tri_2e7_3000_10": {
+        "T": 10e-6,
+        "B": 2e8,
+        "linewidth": 1.0e6,
+        "sample_rate": 2.0e7,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-4,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "triangle",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "sin_2e9_3000_10": {
+        "T": 10.0e-6,
+        "B": 10e9,
+        "linewidth": 1.0e6,
+        "sample_rate": 2.0e9,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-4,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "sinusoidal",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "tri_2e9_600_5": {
+        "T": 2.0e-6,
+        "B": 5e9,
+        "linewidth": 1.0e6,
+        "sample_rate": 2.0e9,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-2,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "triangle",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "sin_2e9_600_5": {
+        "T": 2.0e-6,
+        "B": 5e9,
+        "linewidth": 1.0e6,
+        "sample_rate": 2.0e9,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-2,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "sinusoidal",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "tri_2e9_3000_10": {
+        "T": 10.0e-6,
+        "B": 10e9,
+        "linewidth": 1.0e6,
+        "sample_rate": 2.0e9,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-4,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "triangle",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "sin_2e8_3000_10": {
+        "T": 10.0e-6,
+        "B": 10e8,
+        "linewidth": 1.0e5,
+        "sample_rate": 2.0e8,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-4,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "sinusoidal",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "tri_2e8_3000_10": {
+        "T": 10.0e-6,
+        "B": 10e8,
+        "linewidth": 1.0e5,
+        "sample_rate": 2.0e8,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-4,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "triangle",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "sin_2e8_3000_5": {
+        "T": 10.0e-6,
+        "B": 5e8,
+        "linewidth": 1.0e5,
+        "sample_rate": 2.0e8,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-2,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "sinusoidal",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "tri_2e8_3000_5": {
+        "T": 10.0e-6,
+        "B": 5e8,
+        "linewidth": 1.0e5,
+        "sample_rate": 2.0e8,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-2,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "triangle",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "stair_2e8_3000_5": {
+        "T": 10.0e-6,
+        "B": 5e8,
+        "linewidth": 1.0e5,
+        "sample_rate": 2.0e8,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-2,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "smoothstairs",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "sin_2e8_600_5": {
+        "T": 2.0e-6,
+        "B": 5e8,
+        "linewidth": 1.0e5,
+        "sample_rate": 2.0e8,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-2,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "sinusoidal",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "tri_2e8_600_5": {
+        "T": 2.0e-6,
+        "B": 5e8,
+        "linewidth": 1.0e5,
+        "sample_rate": 2.0e8,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-2,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "triangle",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "stair_2e8_600_5": {
+        "T": 2.0e-6,
+        "B": 5e8,
+        "linewidth": 1.0e5,
+        "sample_rate": 2.0e8,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-2,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "smoothstairs",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "sin_2e8_1000_5_lw1e5": {
+        "T": 5.0e-6,
+        "B": 10e8,
+        "linewidth": 1.0e5,
+        "sample_rate": 4.0e8,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-4,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "sinusoidal",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "tri_2e8_1000_5_lw1e5": {
+        "T": 5.0e-6,
+        "B": 10e8,
+        "linewidth": 1.0e5,
+        "sample_rate": 4.0e8,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-4,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "triangle",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "sin_2e8_1000_5_lw1e6": {
+        "T": 5.0e-6,
+        "B": 10e8,
+        "linewidth": 1.0e6,
+        "sample_rate": 4.0e8,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-4,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "sinusoidal",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "tri_2e8_1000_5_lw1e6": {
+        "T": 5.0e-6,
+        "B": 10e8,
+        "linewidth": 1.0e6,
+        "sample_rate": 4.0e8,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-4,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "triangle",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "tri_2e8_600_1": {
+        "T": 2.0e-6,
+        "B": 0.5e8,
+        "linewidth": 1.0e5,
+        "sample_rate": 2.0e8,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-4,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "triangle",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "tri_2e8_6000_5": {
+        "T": 20.0e-6,
+        "B": 5e8,
+        "linewidth": 1.0e5,
+        "sample_rate": 2.0e8,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-2,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "triangle",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "sin_2e8_6000_5": {
+        "T": 20.0e-6,
+        "B": 5e8,
+        "linewidth": 1.0e5,
+        "sample_rate": 2.0e8,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-2,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "triangle",
+        "complex_available": true,
+        "include_shot_noise": true
+    },
+
+    "sin_noalias": {
+        "T": 2.0e-6,
+        "B": 1e8,
+        "linewidth": 1.0e5,
+        "sample_rate": 2.0e8,
+        "lambd_c": 1550.0e-9,
+        "reflectance": 1.0e-4,
+        "detector_effectivity": 1.0,
+        "transmitted_power": 1.0e-3,
+        "detector_effective_area": 1.0e-6,
+        "modulation": "sinusoidal",
+        "complex_available": true,
+        "include_shot_noise": true
+    }
+}

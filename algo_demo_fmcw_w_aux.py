@@ -1,9 +1,9 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 import chirpgen
 import time_freq
-import filters
 from filters import SignalModel
 import algo.sparse
 from complex_sparse_viz import visualize
@@ -11,6 +11,7 @@ import fmcw_aux
 import algo.filter
 
 plt.rcParams['axes.prop_cycle'] = plt.cycler(color=plt.colormaps['Set1'].colors)
+mpl.rcParams['image.cmap'] = 'inferno'
 # plt.set_cmap('inferno')
 set_colors = plt.colormaps['Set1'].colors
 
@@ -36,7 +37,7 @@ config = chirpgen.ChirpGeneratorConfig(Tchirp=Tchirp,
                                         generation_type="continuous",
                                         lambd_c=1e-3,
                                         dechirp=True,
-                                        phase_noise_stdv=bandwidth*0.03,
+                                        phase_noise_stdv=bandwidth*0.02,
                                         additive_noise_stdv=0,
                                         distance_fall_off=False,
                                         phase_noise_type="stationary_freq_from_psd",
@@ -46,11 +47,10 @@ config = chirpgen.ChirpGeneratorConfig(Tchirp=Tchirp,
                                         transmitted_power=1,
                                         )
 
-
 generator = chirpgen.ChirpGenerator(config)
 t = np.arange(0, Trep*3, 1/sample_rate)
-# distance = np.array([14.51, 20.08, 24.3])
-distance = np.array([14.51, 21.59, 24.36])
+distance = np.array([14.51, 20.08, 24.3])
+# distance = np.array([14.51, 21.59, 24.36])
 aux_distance = 21.59
 refl = [0.1, 1, 0.01]
 y = generator.generate(t, distance, reflection_coef=refl) + ( np.random.randn(len(t)) + 1j*np.random.randn(len(t)) ) * 0.1
@@ -59,20 +59,38 @@ y = np.real(y)
 aux = np.real(aux)
 
 d_low, d_high = 12, 30
+target_d_low, target_d_high = 23, 26
+
+bp_params = dict(lambd=60, rho=1000, n_iter=1000, tol=3e-7, 
+                  t_low=d_low*2/3e8, t_high=d_high*2/3e8)
+
+bbp_params = dict(lambd=30, window_len=500, stride=250, rho=1000, 
+                  window="blackmanharris", n_iter=1000, tol=3e-7, 
+                  t_low=d_low*2/3e8, t_high=d_high*2/3e8)
+
+mf_params = dict(t_low=d_low*2/3e8, t_high=d_high*2/3e8)
+bmf_params = dict(window_len=1000, stride=500,
+                  window="blackmanharris",
+                  t_low=d_low*2/3e8, t_high=d_high*2/3e8)
+
+mp_params = dict(refine=True, 
+                orthogonalize=False, n_iter=100,
+                t_low=d_low*2/3e8, t_high=d_high*2/3e8)
+bmp_params = dict(window_len=300,
+                    refine=True, 
+                    orthogonalize=False, n_iter=100, 
+                    t_low=d_low*2/3e8, t_high=d_high*2/3e8)
+
+
 model0 = SignalModel(config, model_type="config")
 ynew = y*model0.get_complex_waveform(t)*(t>=Trep)*(t<Trep*2)
 print(len(ynew))
 M = np.ceil(bandwidth/sample_rate).astype(int)
 print("running bp without auxiliary...")
-bp0 = algo.sparse.basis_pursuit_faster(model0, t, ynew, uprate=M, 
-                                      lambd=30, rho=1000, n_iter=1000, tol=3e-7,
-                                      t_low=d_low*2/3e8, t_high=d_high*2/3e8)
+bp0 = algo.sparse.basis_pursuit_faster(model0, t, ynew, uprate=M, **bp_params)
 bp0 = _normalize(np.abs(bp0))
 
-bbp0 = algo.sparse.bartlett_basis_pursuit_faster(model0, t, ynew, uprate=M, lambd=30, 
-                                                window_len=1000, stride=500, rho=1000,
-                                                window="blackmanharris", n_iter=1000, tol=3e-7,
-                                                t_low=d_low*2/3e8, t_high=d_high*2/3e8)
+bbp0 = algo.sparse.bartlett_basis_pursuit_faster(model0, t, ynew, uprate=M, **bbp_params)
 bbp0 = _normalize(np.mean(np.abs(bbp0), axis=0))
 
 ift, ifq = fmcw_aux.estimate_if_hilbert(aux, fs=1000, filt=dict(type="fir", fc=20))
@@ -94,42 +112,25 @@ aux_model = aux_model_tx*np.conj(aux_model_rx)
 
 print("running bp with auxiliary...")
 ynew = y*model.get_complex_waveform(t)*(t>=Trep)*(t<Trep*2)
-bp = algo.sparse.basis_pursuit_faster(model, t, ynew, uprate=M, 
-                                      lambd=30, rho=1000, n_iter=1000, tol=3e-7,
-                                      t_low=d_low*2/3e8, t_high=d_high*2/3e8)
+bp = algo.sparse.basis_pursuit_faster(model, t, ynew, uprate=M, **bp_params)
 bp = _normalize(np.abs(bp))
 
-bbp = algo.sparse.bartlett_basis_pursuit_faster(model, t, ynew, uprate=M, lambd=30, 
-                                                window_len=1000, stride=500, rho=1000,
-                                                window="blackmanharris", n_iter=1000, tol=3e-7,
-                                                t_low=d_low*2/3e8, t_high=d_high*2/3e8)
+bbp = algo.sparse.bartlett_basis_pursuit_faster(model, t, ynew, uprate=M, **bbp_params)
 bbp = _normalize(np.mean(np.abs(bbp), axis=0))
 
 print("running mp with auxiliary...")
-mp_delays, mp_amplitude = algo.sparse.matching_pursuit(model, t, ynew, M, refine=True, 
-                                                       orthogonalize=False, n_iter=100,
-                                                       t_low=d_low*2/3e8, t_high=d_high*2/3e8)
+mp_delays, mp_amplitude = algo.sparse.matching_pursuit(model, t, ynew, M, **mp_params)
 mp_amplitude = _normalize(np.abs(mp_amplitude))
 
-bmp_delays, bmp_amplitude = algo.sparse.bartlett_matching_pursuit(model, t, ynew, M, window_len=300,
-                                                                  refine=True, 
-                                                                  orthogonalize=False, n_iter=100, 
-                                                                  t_low=d_low*2/3e8, t_high=d_high*2/3e8)
+bmp_delays, bmp_amplitude = algo.sparse.bartlett_matching_pursuit(model, t, ynew, M, **bmp_params)
 bmp_amplitude = _normalize(np.mean(np.abs(bmp_amplitude),axis=1))
 
 print("running mf with auxiliary...")
 d_weaklow, d_weakhigh = 23, 26
-(mf_delays, mf_peaks), (tmf, mf) = algo.filter.matchedfilter(model, t, ynew, uprate=M,
-                                                      t_low=d_weaklow*2/3e8, t_high=d_weakhigh*2/3e8, top_k=10,
-                                                      distance=10)
+tmf, mf = algo.filter.matchedfilter(model, t, ynew, uprate=M, **mf_params)
 mf = _normalize(mf)
 
-(bmf_delays, bmf_peaks), (tbmf, bmf) = algo.filter.bartlett_matchedfilter(model, t, ynew, uprate=M,
-                                                                 window_len=1000, stride=500,
-                                                                 window="blackmanharris",
-                                                                 t_low=d_weaklow*2/3e8, t_high=d_weakhigh*2/3e8, 
-                                                                 top_k=10,
-                                                                 distance=10)
+tbmf, bmf = algo.filter.bartlett_matchedfilter(model, t, ynew, uprate=M, **bmf_params)
 bmf = _normalize(bmf)
 
 plt.figure(figsize=(16,12))
@@ -151,7 +152,7 @@ plt.subplot(335)
 ff, tt, xx = time_freq.short_time_fourier_transform(y, 32, 8, zero_pad=512-32)
 plt.pcolormesh(tt, ff, np.log10(np.abs(xx)))
 plt.title("scene signal")
-plt.subplot(336)
+ax = plt.subplot(336)
 plt.plot(np.arange(len(bp0))/M/sample_rate/2*3e8, bp0, zorder=2, label="bp", color="dodgerblue")
 plt.plot(np.arange(len(bbp0))/M/sample_rate/2*3e8, bbp0, zorder=3, label="bbp", color="green")
 plt.vlines(distance, ymin=0, ymax=1, linestyle="-", zorder=1, label="true", color="red")
@@ -159,15 +160,15 @@ plt.scatter(distance, np.abs(refl), marker="*", zorder=5, c="red")
 plt.xlim(d_low, d_high)
 plt.legend()
 plt.title("Basis Pursuit without auxiliary")
-plt.subplot(337)
+plt.subplot(337, sharex=ax, sharey=ax)
 plt.plot(tmf/2*3e8, mf, zorder=2, label="mf", color="purple")
 plt.plot(tbmf/2*3e8, bmf, zorder=3, label="bmf", color="orange")
 plt.vlines(distance, ymin=0, ymax=1, linestyle="-", zorder=1, label="true", color="red")
 plt.scatter(distance, np.abs(refl), marker="*", zorder=5, c="red")
-plt.xlim(d_weaklow, d_weakhigh)
+plt.xlim(d_low, d_high)
 plt.legend()
 plt.title("Matched Filter with auxiliary")
-plt.subplot(338)
+plt.subplot(338, sharex=ax, sharey=ax)
 plt.scatter(mp_delays/sample_rate/2*3e8, mp_amplitude, marker="o", c="purple", label="mp")
 plt.scatter(bmp_delays/sample_rate/2*3e8, bmp_amplitude, marker="o", c="orange", label="bmp")
 plt.vlines(distance, ymin=0, ymax=1, linestyle="-", zorder=1, label="true", color="red")
@@ -175,7 +176,7 @@ plt.scatter(distance, np.abs(refl), marker="*", zorder=5, c="red")
 plt.xlim(d_low, d_high)
 plt.legend()
 plt.title("Matching Pursuit with auxiliary")
-plt.subplot(339)
+plt.subplot(339, sharex=ax, sharey=ax)
 plt.plot(np.arange(len(bp))/M/sample_rate/2*3e8, bp, zorder=2, label="bp", color="dodgerblue")
 plt.plot(np.arange(len(bbp))/M/sample_rate/2*3e8, bbp, zorder=3, label="bbp", color="green")
 plt.vlines(distance, ymin=0, ymax=1, linestyle="-", zorder=1, label="true", color="red")
@@ -189,70 +190,83 @@ print("subtracting strong reflections")
 strong_ift, strong_ifq = fmcw_aux.estimate_if_fcrm(y)
 strong_ift *= 1/sample_rate
 strong_ifq *= sample_rate
-y_subtracted = fmcw_aux.subtract_signal(t, y, strong_ift, strong_ifq, 200, period=3*Trep)
+ifq_resamp = np.interp(strong_ift, ift, ifq)
+if np.mean((strong_ifq+ifq_resamp)**2) < np.mean((strong_ifq-ifq_resamp)**2):
+    strong_ifq *= -1
+y_subtracted = fmcw_aux.subtract_signal(t, y, strong_ift, strong_ifq, 300, period=3*Trep)
 
 ynew = y_subtracted*model0.get_complex_waveform(t)*(t>=Trep)*(t<Trep*2)
 print("running bp without auxiliary...")
-bp0 = algo.sparse.basis_pursuit_faster(model0, t, ynew, uprate=M, 
-                                      lambd=30, rho=1000, n_iter=1000, tol=3e-7,
-                                      t_low=d_low*2/3e8, t_high=d_high*2/3e8)
+bp0 = algo.sparse.basis_pursuit_faster(model0, t, ynew, uprate=M, **bp_params)
 bp0 = _normalize(np.abs(bp0))
 
-bbp0 = algo.sparse.bartlett_basis_pursuit_faster(model0, t, ynew, uprate=M, lambd=30, 
-                                                window_len=1000, stride=500, rho=1000,
-                                                window="blackmanharris", n_iter=1000, tol=3e-7,
-                                                t_low=d_low*2/3e8, t_high=d_high*2/3e8)
+bbp0 = algo.sparse.bartlett_basis_pursuit_faster(model0, t, ynew, uprate=M, **bbp_params)
 bbp0 = _normalize(np.mean(np.abs(bbp0), axis=0))
 
 print("running bp with auxiliary...")
+
 ynew = y_subtracted*model.get_complex_waveform(t)*(t>=Trep)*(t<Trep*2)
-bp = algo.sparse.basis_pursuit_faster(model, t, ynew, uprate=M, 
-                                      lambd=60, rho=1000, n_iter=1000, tol=3e-7,
-                                      t_low=d_low*2/3e8, t_high=d_high*2/3e8)
+bp = algo.sparse.basis_pursuit_faster(model, t, ynew, uprate=M, **bp_params)
 bp = _normalize(np.abs(bp))
 
-bbp = algo.sparse.bartlett_basis_pursuit_faster(model, t, ynew, uprate=M, lambd=30, 
-                                                window_len=1000, stride=500, rho=1000,
-                                                window="blackmanharris", n_iter=1000, tol=3e-7,
-                                                t_low=d_low*2/3e8, t_high=d_high*2/3e8)
+bbp = algo.sparse.bartlett_basis_pursuit_faster(model, t, ynew, uprate=M, **bbp_params)
 bbp = _normalize(np.mean(np.abs(bbp), axis=0))
 
 print("running mp with auxiliary...")
-mp_delays, mp_amplitude = algo.sparse.matching_pursuit(model, t, ynew, M, refine=True, 
-                                                       orthogonalize=False, n_iter=100,
-                                                       t_low=d_low*2/3e8, t_high=d_high*2/3e8)
+mp_delays, mp_amplitude = algo.sparse.matching_pursuit(model, t, ynew, M, **mp_params)
 mp_amplitude = _normalize(np.abs(mp_amplitude))
 
-bmp_delays, bmp_amplitude = algo.sparse.bartlett_matching_pursuit(model, t, ynew, M, window_len=300,
-                                                                  refine=True, 
-                                                                  orthogonalize=False, n_iter=100, 
-                                                                  t_low=d_low*2/3e8, t_high=d_high*2/3e8)
+bmp_delays, bmp_amplitude = algo.sparse.bartlett_matching_pursuit(model, t, ynew, M, **bmp_params)
 bmp_amplitude = _normalize(np.mean(np.abs(bmp_amplitude),axis=1))
 
 print("running mf with auxiliary...")
-d_weaklow, d_weakhigh = 23, 26
-(mf_delays, mf_peaks), (tmf, mf) = algo.filter.matchedfilter(model, t, ynew, uprate=M,
-                                                      t_low=d_weaklow*2/3e8, t_high=d_weakhigh*2/3e8, top_k=10,
-                                                      distance=10)
+tmf, mf = algo.filter.matchedfilter(model, t, ynew, uprate=M, **mf_params)
 mf = _normalize(mf)
 
-(bmf_delays, bmf_peaks), (tbmf, bmf) = algo.filter.bartlett_matchedfilter(model, t, ynew, uprate=M,
-                                                                 window_len=1000, stride=500,
-                                                                 window="blackmanharris",
-                                                                 t_low=d_weaklow*2/3e8, t_high=d_weakhigh*2/3e8, 
-                                                                 top_k=10,
-                                                                 distance=10)
+tbmf, bmf = algo.filter.bartlett_matchedfilter(model, t, ynew, uprate=M, **bmf_params)
 bmf = _normalize(bmf)
 
-plt.figure(figsize=(16,8))
-plt.subplot(231)
+print("updating model with strong reflection")
+modufuncsolver = fmcw_aux.ModuFuncSolver(len(t), sample_rate, 
+                                         [aux_distance*2/3e8, distance[1]*2/3e8], period=3*Trep, 
+                                         method="ridge", verbose=True)
+a_est = modufuncsolver.estimate((ift, ifq/sample_rate), (strong_ift, strong_ifq/sample_rate))
+a_est *= sample_rate
+a_est = np.convolve(a_est, np.ones((101,))/101, mode="same")
+model = SignalModel((t, a_est), model_type="inst_freq", period=3*Trep)
+
+print("running bp with auxiliary...")
+
+ynew = y_subtracted*model.get_complex_waveform(t)*(t>=Trep)*(t<Trep*2)
+bp2 = algo.sparse.basis_pursuit_faster(model, t, ynew, uprate=M, **bp_params)
+bp2 = _normalize(np.abs(bp2))
+
+bbp2 = algo.sparse.bartlett_basis_pursuit_faster(model, t, ynew, uprate=M, **bbp_params)
+bbp2 = _normalize(np.mean(np.abs(bbp2), axis=0))
+
+print("running mp with auxiliary...")
+mp2_delays, mp2_amplitude = algo.sparse.matching_pursuit(model, t, ynew, M, **mp_params)
+mp2_amplitude = _normalize(np.abs(mp2_amplitude))
+
+bmp2_delays, bmp2_amplitude = algo.sparse.bartlett_matching_pursuit(model, t, ynew, M, **bmp_params)
+bmp2_amplitude = _normalize(np.mean(np.abs(bmp2_amplitude),axis=1))
+
+print("running mf with auxiliary...")
+tmf2, mf2 = algo.filter.matchedfilter(model, t, ynew, uprate=M, **mf_params)
+mf2 = _normalize(mf2)
+
+tbmf2, bmf2 = algo.filter.bartlett_matchedfilter(model, t, ynew, uprate=M, **bmf_params)
+bmf2 = _normalize(bmf2)
+
+plt.figure(figsize=(16,12))
+plt.subplot(331)
 plt.plot(strong_ift, strong_ifq)
 plt.title("IF estimate of strong reflections")
-plt.subplot(232)
+plt.subplot(332)
 ff, tt, xx = time_freq.short_time_fourier_transform(y_subtracted, 32, 8, zero_pad=512-32)
 plt.pcolormesh(tt, ff, np.log10(np.abs(xx)))
 plt.title("subtracted scene")
-plt.subplot(233)
+ax = plt.subplot(333)
 plt.plot(np.arange(len(bp0))/M/sample_rate/2*3e8, bp0, zorder=2, label="bp", color="dodgerblue")
 plt.plot(np.arange(len(bbp0))/M/sample_rate/2*3e8, bbp0, zorder=3, label="bbp", color="green")
 plt.vlines(distance, ymin=0, ymax=1, linestyle="-", zorder=1, label="true", color="red")
@@ -260,15 +274,15 @@ plt.scatter(distance, np.abs(refl), marker="*", zorder=5, c="red")
 plt.xlim(d_low, d_high)
 plt.legend()
 plt.title("Basis Pursuit without auxiliary")
-plt.subplot(234)
+plt.subplot(334, sharex=ax, sharey=ax)
 plt.plot(tmf/2*3e8, mf, zorder=2, label="mf", color="purple")
 plt.plot(tbmf/2*3e8, bmf, zorder=3, label="bmf", color="orange")
 plt.vlines(distance, ymin=0, ymax=1, linestyle="-", zorder=1, label="true", color="red")
 plt.scatter(distance, np.abs(refl), marker="*", zorder=5, c="red")
-plt.xlim(d_weaklow, d_weakhigh)
+plt.xlim(d_low, d_high)
 plt.legend()
 plt.title("Matched Filter with auxiliary")
-plt.subplot(235)
+plt.subplot(335, sharex=ax, sharey=ax)
 plt.scatter(mp_delays/sample_rate/2*3e8, mp_amplitude, marker="o", c="purple", label="mp")
 plt.scatter(bmp_delays/sample_rate/2*3e8, bmp_amplitude, marker="o", c="orange", label="bmp")
 plt.vlines(distance, ymin=0, ymax=1, linestyle="-", zorder=1, label="true", color="red")
@@ -276,7 +290,7 @@ plt.scatter(distance, np.abs(refl), marker="*", zorder=5, c="red")
 plt.xlim(d_low, d_high)
 plt.legend()
 plt.title("Matching Pursuit with auxiliary")
-plt.subplot(236)
+plt.subplot(336, sharex=ax, sharey=ax)
 plt.plot(np.arange(len(bp))/M/sample_rate/2*3e8, bp, zorder=2, label="bp", color="dodgerblue")
 plt.plot(np.arange(len(bbp))/M/sample_rate/2*3e8, bbp, zorder=3, label="bbp", color="green")
 plt.vlines(distance, ymin=0, ymax=1, linestyle="-", zorder=1, label="true", color="red")
@@ -284,6 +298,30 @@ plt.scatter(distance, np.abs(refl), marker="*", zorder=5, c="red")
 plt.xlim(d_low, d_high)
 plt.legend()
 plt.title("Basis Pursuit with auxiliary")
+plt.subplot(337, sharex=ax, sharey=ax)
+plt.plot(tmf2/2*3e8, mf2, zorder=2, label="mf", color="purple")
+plt.plot(tbmf2/2*3e8, bmf2, zorder=3, label="bmf", color="orange")
+plt.vlines(distance, ymin=0, ymax=1, linestyle="-", zorder=1, label="true", color="red")
+plt.scatter(distance, np.abs(refl), marker="*", zorder=5, c="red")
+plt.xlim(d_low, d_high)
+plt.legend()
+plt.title("Matched Filter with 2 auxiliary")
+plt.subplot(338, sharex=ax, sharey=ax)
+plt.scatter(mp2_delays/sample_rate/2*3e8, mp2_amplitude, marker="o", c="purple", label="mp")
+plt.scatter(bmp2_delays/sample_rate/2*3e8, bmp2_amplitude, marker="o", c="orange", label="bmp")
+plt.vlines(distance, ymin=0, ymax=1, linestyle="-", zorder=1, label="true", color="red")
+plt.scatter(distance, np.abs(refl), marker="*", zorder=5, c="red")
+plt.xlim(d_low, d_high)
+plt.legend()
+plt.title("Matching Pursuit with 2 auxiliary")
+plt.subplot(339, sharex=ax, sharey=ax)
+plt.plot(np.arange(len(bp2))/M/sample_rate/2*3e8, bp2, zorder=2, label="bp", color="dodgerblue")
+plt.plot(np.arange(len(bbp2))/M/sample_rate/2*3e8, bbp2, zorder=3, label="bbp", color="green")
+plt.vlines(distance, ymin=0, ymax=1, linestyle="-", zorder=1, label="true", color="red")
+plt.scatter(distance, np.abs(refl), marker="*", zorder=5, c="red")
+plt.xlim(d_low, d_high)
+plt.legend()
+plt.title("Basis Pursuit with 2 auxiliary")
 plt.tight_layout()
 # model = SignalModel(config, model_type="config")
 

@@ -1,0 +1,24 @@
+[build-system]
+# Tells Python how to package your code behind the scenes
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# Core metadata about your project
+name = "fmcw_processing"
+version = "0.1.0"
+description = "fmcw processing scripts"
+requires-python = ">=3.10"
+
+# Third-party libraries your modules and scripts depend on
+dependencies = [
+    "requests>=2.31.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+# Optional groups of dependencies (e.g., only needed for development/testing)
+dev = [
+    "pytest>=8.0",
+    "black>=24.0",
+]

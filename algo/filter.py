@@ -11,8 +11,7 @@ from typing import List
 
 def matchedfilter(signal_model:SignalModel, 
                   t:np.ndarray, y:np.ndarray, 
-                  uprate:int, t_low:float=None, t_high:float=None, top_k:int=10,
-                  **find_peaks_params):
+                  uprate:int, t_low:float=None, t_high:float=None):
     M = uprate
     del_t = t[1]-t[0]
     t_fine = np.linspace(t[0],t[-1]+(M-1)/M*del_t, M*len(t))
@@ -24,12 +23,14 @@ def matchedfilter(signal_model:SignalModel,
         search_region *= (t_fine>=t_low)
     if t_high:
         search_region *= (t_fine<=t_high)
-    peaks, _ = find_peaks(mf_output[search_region], **find_peaks_params)
-    peaks = peaks + np.argmax(search_region)
-    a = np.argsort(mf_output[peaks])[-top_k:]
-    d = t_fine[peaks][a]
-    p = mf_output[peaks][a]
-    return (d, p), (t_fine[search_region], mf_output[search_region])
+    return t_fine[search_region], mf_output[search_region]
+
+    # peaks, _ = find_peaks(mf_output[search_region], **find_peaks_params)
+    # peaks = peaks + np.argmax(search_region)
+    # a = np.argsort(mf_output[peaks])[-top_k:]
+    # d = t_fine[peaks][a]
+    # p = mf_output[peaks][a]
+    # return (d, p), (t_fine[search_region], mf_output[search_region])
 
 def _get_start_end_of_each_window(N, L, s):
     n_win = (N - L) // s + 1
@@ -43,8 +44,7 @@ def bartlett_matchedfilter(signal_model:SignalModel,
                                 window_len:int,
                                 stride:int=None,
                                 window:str="rect",
-                                t_low:float=None, t_high:float=None, top_k:int=10,
-                                **find_peaks_params):
+                                t_low:float=None, t_high:float=None):
     if stride is None:
         stride = window_len // 2
     assert(window_len >= stride)
@@ -72,9 +72,4 @@ def bartlett_matchedfilter(signal_model:SignalModel,
         search_region *= (t_fine>=t_low)
     if t_high:
         search_region *= (t_fine<=t_high)
-    peaks, _ = find_peaks(mf_output[search_region], **find_peaks_params)
-    peaks = peaks + np.argmax(search_region)
-    a = np.argsort(mf_output[peaks])[-top_k:]
-    d = t_fine[peaks][a]
-    p = mf_output[peaks][a]
-    return (d, p), (t_fine[search_region], mf_output[search_region])
+    return t_fine[search_region], mf_output[search_region]

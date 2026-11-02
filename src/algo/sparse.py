@@ -37,6 +37,7 @@ def matching_pursuit(signal_model:SignalModel,
                     orthogonalize:bool=False,
                     n_iter:int=100, rel_tol:float=1e-5,
                     get_first_mf_response:bool=False, 
+                    mask_len:int=0,
                     t_low:float=None, t_high:float=None,
                     verbose:bool=False):
     M = uprate
@@ -68,7 +69,8 @@ def matching_pursuit(signal_model:SignalModel,
             mf_output0 = deepcopy(mf_output)
         if len(argmaxes) > 0:
             for i in argmaxes:
-                mf_output[i] = 0
+                # mf_output[i] = 0
+                mf_output[(i-mask_len):(i+mask_len+1)] = 0
         if apply_mask:
             argmax_idx = np.argmax(mf_output)
         else:
@@ -136,6 +138,7 @@ def bartlett_matching_pursuit(signal_model:SignalModel,
                                 orthogonalize:bool=False,
                                 n_iter:int=100, rel_tol:float=1e-5,
                                 get_first_mf_response:bool=False,
+                                mask_len:int=0,
                                 t_low:float=None, t_high:float=None,
                                 verbose:bool=False):
     M = uprate
@@ -177,7 +180,8 @@ def bartlett_matching_pursuit(signal_model:SignalModel,
             mf_output0 = deepcopy(mf_output)
         if len(argmaxes) > 0:
             for i in argmaxes:
-                mf_output[i] = 0
+                # mf_output[i] = 0
+                mf_output[(i-mask_len):(i+mask_len+1)] = 0
         if apply_mask:
             argmax_idx = np.argmax(mf_output)
         else:

@@ -60,6 +60,7 @@ aux = np.real(aux)
 
 d_low, d_high = 12, 30
 target_d_low, target_d_high = 23, 26
+M = np.ceil(bandwidth/sample_rate).astype(int)
 
 bp_params = dict(lambd=60, rho=1000, n_iter=1000, tol=3e-7, 
                   t_low=d_low*2/3e8, t_high=d_high*2/3e8)
@@ -74,18 +75,18 @@ bmf_params = dict(window_len=1000, stride=500,
                   t_low=d_low*2/3e8, t_high=d_high*2/3e8)
 
 mp_params = dict(refine=True, 
-                orthogonalize=False, n_iter=100,
+                orthogonalize=False, n_iter=100, mask_len=int(1*2/3e8*sample_rate*M),
                 t_low=d_low*2/3e8, t_high=d_high*2/3e8)
 bmp_params = dict(window_len=300,
                     refine=True, 
-                    orthogonalize=False, n_iter=100, 
+                    orthogonalize=False, n_iter=100,  mask_len=int(1*2/3e8*sample_rate*M),
                     t_low=d_low*2/3e8, t_high=d_high*2/3e8)
 
+zero_crossings = [(0,400), (1800,2200), (3800,4200), (5800,6200), (7800,8200), (9800,10200)]
 
 model0 = SignalModel(config, model_type="config")
 ynew = y*model0.get_complex_waveform(t)*(t>=Trep)*(t<Trep*2)
 print(len(ynew))
-M = np.ceil(bandwidth/sample_rate).astype(int)
 print("running bp without auxiliary...")
 bp0 = algo.sparse.basis_pursuit_faster(model0, t, ynew, uprate=M, **bp_params)
 bp0 = _normalize(np.abs(bp0))
@@ -93,7 +94,9 @@ bp0 = _normalize(np.abs(bp0))
 bbp0 = algo.sparse.bartlett_basis_pursuit_faster(model0, t, ynew, uprate=M, **bbp_params)
 bbp0 = _normalize(np.mean(np.abs(bbp0), axis=0))
 
-ift, ifq = fmcw_aux.estimate_if_hilbert(aux, fs=1000, filt=dict(type="fir", fc=20))
+ift, ifq = fmcw_aux.estimate_if_hilbert(aux, fs=1000, 
+                                        filt=dict(type="fir", fc=20), 
+                                        tp_params=dict(f_lo=20, loc=zero_crossings))
 ift *= 1/sample_rate
 ifq *= sample_rate
 
@@ -187,7 +190,6 @@ plt.title("Basis Pursuit with auxiliary")
 plt.tight_layout()
 
 print("subtracting strong reflections")
-zero_crossings = [(0,400), (1800,2200), (3800,4200), (5800,6200), (7800,8200), (9800,10200)]
 strong_ift, strong_ifq = fmcw_aux.estimate_if_fcrm(y, zero_crossings=zero_crossings)
 strong_ift *= 1/sample_rate
 strong_ifq *= sample_rate

@@ -1,6 +1,5 @@
 
 import numpy as np
-import chirpgen
 from chirpgen import ChirpGeneratorConfig
 from chirpgen import modulation
 from filters import SignalModel

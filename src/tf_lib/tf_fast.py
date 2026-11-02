@@ -33,7 +33,7 @@ from multiprocessing import shared_memory
 
 import numpy as np
 
-import tf_lib.chirplet_ridge as CR
+from . import chirplet_ridge as CR
 
 TWO_PI = 2 * np.pi
 _OUT_KEYS = {"R", "Rw_omega", "Rw_beta", "C2", "C", "omega_hat", "beta_hat"}

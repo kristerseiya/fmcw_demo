@@ -36,6 +36,13 @@ Ridge detection on the (T, n_omega, n_beta) FCRM volume:
                   (penalize the frequency move minus beta * hop instead of
                   the raw move)
 Multiple components: peeling as in Algorithm 1 step 12.
+Zero-crossing hints (ridge="dp", two-sided grid): sample intervals
+  [idx1, idx2] each bracketing one sign change of the IF. The ridge must be on
+  opposite sides of 0 Hz at idx1 and idx2, the chirp rate is unconstrained in
+  between (no max_db limit; lam_b replaced by lam_b_cross, default 0), and
+  with hold_sign the side stays fixed outside the intervals. Exact: the
+  non-local constraint is made local by doubling the DP states inside each
+  interval (one copy per side at idx1).
 """
 import numpy as np
 import scipy.fft as sfft
@@ -247,11 +254,80 @@ def _viterbi(E_frames, pen_fn):
     return path
 
 
-def ridge_dp(E, shift, lam_k, lam_b, max_dk, max_db, r_k=8, r_b=4):
+def _viterbi_flips(E_frames, pen_fn, side, flips, hold_sign=True, static=False):
+    """_viterbi with sign-change constraints. flips: sorted frame pairs
+    (t1, t2), t1 < t2, intervals sharing at most an end frame; side[t]: +1 / -1
+    per state of frame t. The path's side at t2 must be opposite to its side
+    at t1; hold_sign: no change of side outside the intervals.
+    pen_fn(t, free) -> (n_t, n_{t-1}) penalty of the move t-1 -> t, free=True
+    inside an interval. static: pen_fn and side do not depend on t (the masked
+    penalties are then built once).
+    Inside an interval the DP keeps two copies of the states, copy 0 for paths
+    on side +1 at t1 and copy 1 for side -1, so the constraint is local."""
+    T = len(E_frames)
+    inside = np.zeros(T, bool)                 # frame strictly inside an interval
+    free = np.zeros(T, bool)                   # move t-1 -> t inside an interval
+    for t1, t2 in flips:
+        inside[t1 + 1:t2] = True
+        free[t1 + 1:t2 + 1] = True
+    cache = {}
+
+    def pen(t, kind):
+        if kind in cache:
+            return cache[kind]
+        P = pen_fn(t, free[t])
+        if kind != "free":
+            same = side[t][:, None] == side[t - 1][None, :]
+            P = np.where(same, P, np.inf) if kind == "hold" else np.where(same, np.inf, P)
+        if static:
+            cache[kind] = P
+        return P
+
+    C = E_frames[0][None, :]                   # (copies, states)
+    back = []
+    for t in range(1, T):
+        enter, leave = inside[t] and not inside[t - 1], inside[t - 1] and not inside[t]
+        if not free[t]:
+            M = C[:, None, :] - (pen(t, "hold") if hold_sign else pen_fn(t, False))[None]
+        elif not (inside[t] or inside[t - 1]):  # t1 = t - 1, t2 = t
+            M = C[:, None, :] - pen(t, "flip")[None]
+        else:
+            if enter:                          # split by side at t1
+                C = np.where(side[t - 1][None, :] == np.array([[1], [-1]]), C, -np.inf)
+            M = C[:, None, :] - pen(t, "free")[None]
+        a = M.argmax(-1)                       # (copies, n_t)
+        val = np.take_along_axis(M, a[..., None], -1)[..., 0]
+        if leave:                              # side at t2 opposite to that at t1
+            c, k = (side[t] > 0).astype(int), np.arange(a.shape[1])
+            back.append((c[None, :], a[c, k][None, :]))
+            val = val[c, k][None, :]
+        else:
+            back.append((np.broadcast_to(np.arange(a.shape[0])[:, None] * (not enter), a.shape), a))
+        C = E_frames[t][None, :] + val
+    c, k = np.unravel_index(np.argmax(C), C.shape)
+    if not np.isfinite(C[c, k]):
+        raise ValueError("no ridge satisfies the zero-crossing constraints (an interval "
+                         "too short for max_dk, or hold_sign with a sign change elsewhere)")
+    path = np.empty(T, int)
+    path[-1] = k
+    for t in range(T - 1, 0, -1):
+        bc, bi = back[t - 1]
+        c, k = bc[c, k], bi[c, k]
+        path[t - 1] = k
+    return path
+
+
+def ridge_dp(E, shift, lam_k, lam_b, max_dk, max_db, r_k=8, r_b=4, flips=None,
+             side=None, hold_sign=True, lam_b_cross=0.0):
     """Coarse-to-fine DP maximizing
          sum_t E[t, k_t, b_t] - lam_k sum (dk - shift)^2 - lam_b sum db^2,
     shift = mean of shift[b_{t-1}], shift[b_t] (zeros -> paper's cost (14)).
-    |dk| <= max_dk, |db| <= max_db. Returns (k_path, b_path)."""
+    |dk| <= max_dk, |db| <= max_db. Returns (k_path, b_path).
+    flips: optional frame pairs (t1, t2), t1 < t2, sorted, intervals sharing at
+    most an end frame, each bracketing one sign change: side[k_t1] = -side[k_t2]
+    (side: +1 / -1 per frequency bin); for the moves between t1 and t2 lam_b
+    is replaced by lam_b_cross (0: chirp rate unconstrained) and max_db is not
+    applied. hold_sign: side[k_t] constant outside the intervals."""
     T, K, B = E.shape
     r_b = min(r_b, B)
     Kc, Bc = int(np.ceil(K / r_k)), int(np.ceil(B / r_b))
@@ -266,9 +342,20 @@ def ridge_dp(E, shift, lam_k, lam_b, max_dk, max_db, r_k=8, r_b=4):
     sh_c = np.interp(CB, np.arange(B), shift)
     dk = CK[:, None] - CK[None, :]
     db = CB[:, None] - CB[None, :]
-    Pc = lam_k * (dk - 0.5 * (sh_c[:, None] + sh_c[None, :])) ** 2 + lam_b * db ** 2
+    Pk = lam_k * (dk - 0.5 * (sh_c[:, None] + sh_c[None, :])) ** 2
+    Pc = Pk + lam_b * db ** 2
     Pc[(np.abs(dk) > max_dk + r_k) | (np.abs(db) > max_db + r_b)] = np.inf
-    pc = _viterbi([Ec[t] for t in range(T)], lambda t: Pc)
+    if flips is not None:
+        Pc_free = Pk + lam_b_cross * db ** 2
+        Pc_free[np.abs(dk) > max_dk + r_k] = np.inf
+        # side of a coarse cell = side of its best fine cell (the one refined below);
+        # constant in time unless a cell straddles 0 Hz
+        k_rep = np.arange(Kc)[None, :, None] * r_k + arg // r_b
+        side_c = side[np.clip(k_rep, 0, K - 1)].reshape(T, -1)
+        pc = _viterbi_flips([Ec[t] for t in range(T)], lambda t, f: Pc_free if f else Pc,
+                            side_c, flips, hold_sign, static=bool(np.all(side_c == side_c[0])))
+    else:
+        pc = _viterbi([Ec[t] for t in range(T)], lambda t: Pc)
     ic, jc = np.divmod(pc, Bc)
     sub = arg[np.arange(T), ic, jc]
     k_cent = np.clip(ic * r_k + sub // r_b, 0, K - 1)
@@ -282,14 +369,21 @@ def ridge_dp(E, shift, lam_k, lam_b, max_dk, max_db, r_k=8, r_b=4):
     Ef = np.where(valid, E[np.arange(T)[:, None], Kcl, Bcl], -np.inf)
     shf = shift[Bcl]
 
-    def pen(t):
+    def pen(t, free=False):
         dk = Ks[t][:, None] - Ks[t - 1][None, :]
+        P = lam_k * (dk - 0.5 * (shf[t][:, None] + shf[t - 1][None, :])) ** 2
         db = Bs[t][:, None] - Bs[t - 1][None, :]
-        P = lam_k * (dk - 0.5 * (shf[t][:, None] + shf[t - 1][None, :])) ** 2 + lam_b * db ** 2
-        P[(np.abs(dk) > max_dk) | (np.abs(db) > max_db)] = np.inf
+        P += (lam_b_cross if free else lam_b) * db ** 2
+        bad = np.abs(dk) > max_dk
+        if not free:
+            bad |= np.abs(db) > max_db
+        P[bad] = np.inf
         return P
 
-    pf = _viterbi([Ef[t] for t in range(T)], pen)
+    if flips is not None:
+        pf = _viterbi_flips([Ef[t] for t in range(T)], pen, side[Kcl], flips, hold_sign)
+    else:
+        pf = _viterbi([Ef[t] for t in range(T)], pen)
     return Ks[np.arange(T), pf], Bs[np.arange(T), pf]
 
 
@@ -339,15 +433,40 @@ def _energy_linear(R, blur):
     return Rb / np.maximum(Rb.max(axis=(1, 2), keepdims=True), 1e-300)
 
 
+def _flip_frames(zero_crossings, t):
+    """Sample intervals [idx1, idx2] -> sorted frame pairs (t1, t2): nearest
+    frame centres t, clipped so that t1 < t2."""
+    iv = np.atleast_2d(np.asarray(zero_crossings, dtype=float))
+    if iv.size == 0:
+        return []
+    if iv.ndim != 2 or iv.shape[1] != 2:
+        raise ValueError("zero_crossings must be a pair (idx1, idx2) or a list of pairs")
+    flips = []
+    for a, b in sorted(np.sort(iv, axis=1).tolist()):
+        t1 = min(int(np.argmin(np.abs(t - a))), t.size - 2)
+        t2 = max(int(np.argmin(np.abs(t - b))), t1 + 1)
+        if flips and t1 < flips[-1][1]:
+            raise ValueError(f"zero_crossings intervals overlap (frames {flips[-1]} and "
+                             f"{(t1, t2)}); give at most one sign change per interval")
+        flips.append((t1, t2))
+    return flips
+
+
 def extract_ridges(tfr, n_ridges=1, ridge="dp", lam_k=0.05, lam_b=0.05,
                    max_dk=None, max_db=4, prediction=True, r_k=8, r_b=4,
                    remove=(6, 6), blur=(1.0, 1.0), n_init=10, rng=None,
-                   energy="log"):
+                   energy="log", zero_crossings=None, hold_sign=True, lam_b_cross=0.0):
     """Peel n_ridges ridges from tfr['R'] (paper Algorithm 1, step 12).
     ridge="dp": coarse-to-fine DP; ridge="greedy": Algorithm 1.
     energy (DP only): "log" (log of blurred energy, frame max = 0) or
     "linear" (blurred energy, frame max = 1, as the greedy detector and
-    the paper's cost (14) use). Greedy always uses "linear". Returns lists of k and b paths."""
+    the paper's cost (14) use). Greedy always uses "linear".
+    zero_crossings (DP only, two-sided grid): sample intervals [idx1, idx2],
+    each holding one sign change of the IF; every ridge is forced onto opposite
+    sides of 0 Hz at idx1 and idx2 (nearest frames), with the chirp rate
+    unconstrained in between (lam_b_cross > 0: penalized like lam_b, no
+    max_db limit). hold_sign: the intervals hold ALL sign changes, i.e. the
+    ridge keeps its side elsewhere. Returns lists of k and b paths."""
     R = tfr["R"].copy()
     T, K, B = R.shape
     hop = tfr["hop"]
@@ -355,12 +474,21 @@ def extract_ridges(tfr, n_ridges=1, ridge="dp", lam_k=0.05, lam_b=0.05,
     if max_dk is None:
         max_dk = int(np.ceil(np.abs(tfr["beta_out"]).max() * hop / tfr["d_om"])) + 6
     max_db = min(max_db, B - 1)
+    flips, side = None, None
+    if zero_crossings is not None:
+        if ridge != "dp":
+            raise ValueError("zero_crossings needs ridge='dp'")
+        side = np.where(tfr["omega_out"] >= 0, 1, -1)
+        if np.all(side > 0):
+            raise ValueError("zero_crossings needs a two-sided frequency grid (onesided=False)")
+        flips = _flip_frames(zero_crossings, np.asarray(tfr["t"]))
     paths = []
     for _ in range(n_ridges):
         bl = blur if B > 1 else (blur[0], 0)
         if ridge == "dp":
             E = _energy_log(R, bl) if energy == "log" else _energy_linear(R, bl)
-            kp, bp = ridge_dp(E, shift, lam_k, lam_b, max_dk, max_db, r_k, r_b)
+            kp, bp = ridge_dp(E, shift, lam_k, lam_b, max_dk, max_db, r_k, r_b,
+                              flips, side, hold_sign, lam_b_cross)
         elif ridge == "greedy":
             # Algorithm 1 on linear energy; each frame normalized to max 1 so
             # that lam_k, lam_b have the same meaning in every frame
@@ -404,21 +532,36 @@ def estimate_ifs(x, fs, n_components=1, sigma=10.0, hop=4, nfft=128,
                  ridge="dp", lam_k=0.05, lam_b=0.05, max_dk=None, max_db=4,
                  prediction=True, r_k=8, r_b=4, remove=(6, 6), blur=(1.0, 1.0),
                  readout_cells=(2, 2), n_init=10, energy="log", return_tfr=False,
-                 reassign=None):
+                 reassign=None, zero_crossings=None, hold_sign=True, lam_b_cross=0.0):
     """IF (Hz) and chirp rate (Hz/s) of n_components ridges.
-    onesided: restrict to positive frequencies (default: True for real x).
+    onesided: restrict to positive frequencies (default: True for real x
+    without zero_crossings).
     reassign: function computing the transform (default chirplet_reassign), e.g.
     functools.partial(tf_fast.chirplet_reassign_fast, backend="processes").
+    zero_crossings: optional sign-change hints for a real x on the two-sided
+    grid, a pair (idx1, idx2) or a list of pairs of sample indices of x, each
+    interval holding exactly one sign change of the IF. The ridge then has
+    opposite signs of frequency at idx1 and idx2 (nearest frames) and its chirp
+    rate is unconstrained in between (no lam_b penalty, no max_db limit).
+    Intervals may share an end but not overlap. ridge="dp" only.
+    hold_sign: with zero_crossings, the intervals list ALL sign changes: the
+    ridge keeps the sign of its frequency outside them (default; an empty
+    list then means no sign change at all). False: only the flip across each
+    interval is enforced.
+    lam_b_cross: chirp-rate penalty (per bin^2) inside the intervals, replacing
+    lam_b there; 0 (default) leaves the chirp rate free. max_db never applies there.
     Returns t (s), IF (n_components, T), CR (n_components, T) [, tfr]."""
     if onesided is None:
-        onesided = np.isrealobj(x)
+        onesided = np.isrealobj(x) and zero_crossings is None
     beta_max = None if beta_max_hz_s is None else beta_max_hz_s * TWO_PI / fs ** 2
     tfr = (reassign or chirplet_reassign)(x, sigma=sigma, hop=hop, nfft=nfft, n_beta_in=n_beta_in,
                             beta_max=beta_max, n_omega_out=n_omega_out,
                             n_beta_out=n_beta_out, mode=mode, gamma=gamma,
                             omega_range=(0.0, np.pi) if onesided else None)
     paths = extract_ridges(tfr, n_components, ridge, lam_k, lam_b, max_dk, max_db,
-                           prediction, r_k, r_b, remove, blur, n_init, energy=energy)
+                           prediction, r_k, r_b, remove, blur, n_init, energy=energy,
+                           zero_crossings=zero_crossings, hold_sign=hold_sign,
+                           lam_b_cross=lam_b_cross)
     IF, CR = [], []
     for kp, bp in paths:
         w, b = readout(tfr, kp, bp, *readout_cells)

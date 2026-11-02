@@ -198,13 +198,17 @@ def fsst_estimate(x, fs, B, f_scale, sigma=8.0, lam=0.002, hop=4, n_omega_out=51
 
 def fcrm_estimate(x, fs, B, f_scale, sigma=8.0, lam_f=0.05, lam_c=0.3, hop=8,
                   n_omega_out=256, n_beta_out=48, n_beta_in=16, mode="eq9",
-                  prediction=True, onesided=True, r_k=8, r_b=4, return_tfr=False):
+                  prediction=True, onesided=True, r_k=8, r_b=4, return_tfr=False,
+                  zero_crossings=None, hold_sign=True, lam_c_cross=0.0):
     """FCRM (chirplet + frequency-chirprate reassignment) + coarse-to-fine 3-D
     DP ridge. The chirp-rate grid spans +/- 4 std of the IF slope expected
     for bandwidth B, so lam_c (per chirp-rate bin^2) scales with the process.
     lam_f: penalty per frequency bin^2 of the jump residual (jump minus the
     move predicted by the chirp rate when prediction=True). Frequency bins:
     (fs/2)/n_omega_out Hz when onesided, fs/n_omega_out otherwise.
+    zero_crossings, hold_sign: IF sign-change hints (sample intervals), see
+    chirplet_ridge.estimate_ifs; need onesided=False. lam_c_cross: lam_c inside
+    the intervals (0 = chirp rate unconstrained there).
     Returns t, IF[, chirp rate (Hz/s), tfr]."""
     s_std = slope_std(B, f_scale)
     beta_max = max(200.0, 4 * s_std)
@@ -218,7 +222,9 @@ def fcrm_estimate(x, fs, B, f_scale, sigma=8.0, lam_f=0.05, lam_c=0.3, hop=8,
                           n_omega_out=n_omega_out, n_beta_out=n_beta_out, mode=mode,
                           onesided=onesided, ridge="dp", lam_k=lam_f, lam_b=lam_c,
                           max_dk=max_dk, max_db=max_db, prediction=prediction,
-                          r_k=r_k, r_b=r_b, return_tfr=return_tfr)
+                          r_k=r_k, r_b=r_b, return_tfr=return_tfr,
+                          zero_crossings=zero_crossings, hold_sign=hold_sign,
+                          lam_b_cross=lam_c_cross)
     t, IF, CRt = ret[0], ret[1][0], ret[2][0]
     return (t, IF, CRt, ret[3]) if return_tfr else (t, IF)
 

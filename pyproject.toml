@@ -3,6 +3,9 @@
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+where = ["src"] 
+
 [project]
 # Core metadata about your project
 name = "fmcw_processing"
@@ -20,6 +23,5 @@ dependencies = [
 [project.optional-dependencies]
 # Optional groups of dependencies (e.g., only needed for development/testing)
 dev = [
-    "pytest>=8.0",
-    "black>=24.0",
+    "cvxpy>=1.7.5",
 ]

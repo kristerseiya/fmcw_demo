@@ -9,6 +9,15 @@ Shared code for the IF-estimation experiments and demos.
   scoring     MSE and truncated MSE
   driver      multiprocessing experiment runner (one task per GP instance)
 
+Units of the estimators (lowpass, phasediff_estimate, fsst_estimate,
+fcrm_estimate, turning_points*, signed_hilbert_estimate, apply_method): the
+sampling rate is an optional keyword fs, default 1. Frequencies (IF, B,
+f_scale, cutoffs, band edges) are then in cycles/sample, times (outputs,
+env_smooth, min_sep) in samples and chirp rates in cycles/sample^2. Defaults
+are relative to fs, so they hold for any fs; explicit values must be in the
+units of the fs that is passed (Hz and s for the true sampling rate).
+The signal generators and scoring helpers take fs explicitly.
+
 Requires chirplet_ridge.py in the same folder.
 """
 import os
@@ -92,13 +101,15 @@ def _odd(n):
     return n if n % 2 else n + 1
 
 
-def lowpass(v, fs, spec, B=None):
-    """Zero-phase low-pass of a real or complex sequence.
+def lowpass(v, spec, B=None, *, fs=1.0):
+    """Zero-phase low-pass of a real or complex sequence sampled at fs
+    (keyword, default 1).
     spec: None (no filter) or dict
       type  "fir"    windowed-sinc FIR (Hamming), applied centred (zero phase)
             "ma"     moving average of length len
             "butter" Butterworth (order, default 4), forward-backward
-      fc     cutoff in Hz, or fc_rel: cutoff = fc_rel * B
+      fc     cutoff in units of fs (cycles/sample at fs = 1), or fc_rel:
+             cutoff = fc_rel * B
       len    FIR / MA length in samples (odd). None or 0 = automatic:
              FIR  len = 4 fs / fc  (Hamming transition width ~ 0.8 fc)
              MA   len = 0.443 fs / fc  (boxcar -3 dB point at fc)
@@ -143,11 +154,14 @@ def lowpass(v, fs, spec, B=None):
 
 
 # =========================================================================
-# Estimators. Each returns (t in s, IF estimate in Hz[, extras]).
+# Estimators. Each returns (t, IF estimate[, extras]); fs is an optional
+# keyword (default 1): t in samples, IF in cycles/sample, or s and Hz when
+# the true fs is passed.
 # =========================================================================
-def phasediff_estimate(x, fs, B=None, filt=None, domain="freq", analytic=False,
-                       fold=None):
+def phasediff_estimate(x, B=None, filt=None, domain="freq", analytic=False,
+                       fold=None, *, fs=1.0):
     """Phase difference angle(z[n+1] z*[n]) * fs / 2pi, wrapped to (-fs/2, fs/2].
+    B: IF bandwidth for filt["fc_rel"] (units of fs). fs: keyword, default 1.
     analytic=True: z = Hilbert analytic signal of the real x.
     domain="freq":   low-pass the IF estimate (classic)
     domain="phasor": low-pass the complex increments z[n+1] z*[n], then take
@@ -163,14 +177,14 @@ def phasediff_estimate(x, fs, B=None, filt=None, domain="freq", analytic=False,
     inc = z[1:] * np.conj(z[:-1])
     t = (np.arange(inc.size) + 0.5) / fs
     if domain == "phasor":
-        f = np.angle(lowpass(inc, fs, filt, B)) * fs / TWO_PI
+        f = np.angle(lowpass(inc, filt, B, fs=fs)) * fs / TWO_PI
         if fold in ("pre", "post"):
             f = np.abs(f)
     else:
         f = np.angle(inc) * fs / TWO_PI
         if fold == "pre":
             f = np.abs(f)
-        f = lowpass(f, fs, filt, B)
+        f = lowpass(f, filt, B, fs=fs)
         if fold == "post":
             f = np.abs(f)
     return t, f
@@ -181,64 +195,69 @@ def _nfft_for(sigma):
     return max(128, 1 << int(np.ceil(np.log2(L))))
 
 
-def fsst_estimate(x, fs, B, f_scale, sigma=8.0, lam=0.002, hop=4, n_omega_out=512,
-                  r_k=8, return_tfr=False):
+def fsst_estimate(x, B, f_scale, sigma=8.0, lam=0.002, hop=4, n_omega_out=512,
+                  r_k=8, return_tfr=False, *, fs=1.0):
     """Two-sided Gaussian-window FSST + coarse-to-fine 2-D DP ridge.
+    B, f_scale: IF prior (GP bandwidth and IF scale, units of fs; fs: keyword,
+    default 1), used to size the frame-to-frame jump limit.
     lam: penalty per (output frequency bin)^2 of frame-to-frame jump; the
-    output grid is fs / n_omega_out Hz per bin."""
+    output grid is fs / n_omega_out per bin."""
     df = fs / n_omega_out
     max_dk = int(np.ceil(6 * slope_std(B, f_scale) * hop / fs / df)) + 4
-    ret = CR.estimate_ifs(x, fs, n_components=1, sigma=sigma, hop=hop, nfft=_nfft_for(sigma),
+    ret = CR.estimate_ifs(x, n_components=1, sigma=sigma, hop=hop, nfft=_nfft_for(sigma),
                           n_omega_out=n_omega_out, mode="fsst", onesided=False, ridge="dp",
                           lam_k=lam, max_dk=max_dk, prediction=False, r_k=r_k, r_b=1,
-                          blur=(1.0, 0.0), readout_cells=(2, 0), return_tfr=return_tfr)
+                          blur=(1.0, 0.0), readout_cells=(2, 0), return_tfr=return_tfr, fs=fs)
     t, IF = ret[0], ret[1][0]
     return (t, IF, ret[3]) if return_tfr else (t, IF)
 
 
-def fcrm_estimate(x, fs, B, f_scale, sigma=8.0, lam_f=0.05, lam_c=0.3, hop=8,
+def fcrm_estimate(x, B, f_scale, sigma=8.0, lam_f=0.05, lam_c=0.3, hop=8,
                   n_omega_out=256, n_beta_out=48, n_beta_in=16, mode="eq9",
                   prediction=True, onesided=True, r_k=8, r_b=4, return_tfr=False,
-                  zero_crossings=None, hold_sign=True, lam_c_cross=0.0):
+                  zero_crossings=None, hold_sign=True, lam_c_cross=0.0, *, fs=1.0):
     """FCRM (chirplet + frequency-chirprate reassignment) + coarse-to-fine 3-D
-    DP ridge. The chirp-rate grid spans +/- 4 std of the IF slope expected
-    for bandwidth B, so lam_c (per chirp-rate bin^2) scales with the process.
+    DP ridge. B, f_scale: IF prior (GP bandwidth and IF scale, units of fs;
+    fs: keyword, default 1). The chirp-rate grid spans +/- 4 std of the IF
+    slope expected for bandwidth B (at least +/- 2e-4 fs^2), so lam_c (per
+    chirp-rate bin^2) scales with the process.
     lam_f: penalty per frequency bin^2 of the jump residual (jump minus the
     move predicted by the chirp rate when prediction=True). Frequency bins:
-    (fs/2)/n_omega_out Hz when onesided, fs/n_omega_out otherwise.
+    (fs/2)/n_omega_out when onesided, fs/n_omega_out otherwise.
     zero_crossings, hold_sign: IF sign-change hints (sample intervals), see
     chirplet_ridge.estimate_ifs; need onesided=False. lam_c_cross: lam_c inside
     the intervals (0 = chirp rate unconstrained there).
-    Returns t, IF[, chirp rate (Hz/s), tfr]."""
+    Returns t, IF[, chirp rate (units of fs^2), tfr]."""
     s_std = slope_std(B, f_scale)
-    beta_max = max(200.0, 4 * s_std)
+    beta_max = max(2e-4 * fs ** 2, 4 * s_std)       # floor: 200 Hz/s at fs = 1 kHz
     d_beta = 2 * beta_max / (n_beta_out - 1)
     df = (fs / 2 if onesided else fs) / n_omega_out
     max_dk = int(np.ceil(6 * s_std * hop / fs / df)) + 4
     max_db = int(np.ceil(6 * curvature_std(B, f_scale) * hop / fs / d_beta)) + 2
     max_db = min(max_db, n_beta_out - 1)
-    ret = CR.estimate_ifs(x, fs, n_components=1, sigma=sigma, hop=hop, nfft=_nfft_for(sigma),
+    ret = CR.estimate_ifs(x, n_components=1, sigma=sigma, hop=hop, nfft=_nfft_for(sigma),
                           n_beta_in=n_beta_in, beta_max_hz_s=beta_max,
                           n_omega_out=n_omega_out, n_beta_out=n_beta_out, mode=mode,
                           onesided=onesided, ridge="dp", lam_k=lam_f, lam_b=lam_c,
                           max_dk=max_dk, max_db=max_db, prediction=prediction,
                           r_k=r_k, r_b=r_b, return_tfr=return_tfr,
                           zero_crossings=zero_crossings, hold_sign=hold_sign,
-                          lam_b_cross=lam_c_cross)
+                          lam_b_cross=lam_c_cross, fs=fs)
     t, IF, CRt = ret[0], ret[1][0], ret[2][0]
     return (t, IF, CRt, ret[3]) if return_tfr else (t, IF)
 
 
-def apply_method(mth, x, fs, B, f_scale, hop_default=4):
-    """Dispatch one method spec (dict) -> (t, IF)."""
+def apply_method(mth, x, B, f_scale, hop_default=4, *, fs=1.0):
+    """Dispatch one method spec (dict) -> (t, IF). fs: keyword, default 1."""
     kind = mth["kind"]
     if kind == "phasediff":
-        return phasediff_estimate(x, fs, B, mth.get("filter"), mth.get("domain", "freq"),
-                                  analytic=mth.get("analytic", False), fold=mth.get("fold"))
+        return phasediff_estimate(x, B, mth.get("filter"), mth.get("domain", "freq"),
+                                  analytic=mth.get("analytic", False), fold=mth.get("fold"),
+                                  fs=fs)
     if kind == "fsst":
-        return fsst_estimate(x, fs, B, f_scale, **mth.get("params", {}))
+        return fsst_estimate(x, B, f_scale, **mth.get("params", {}), fs=fs)
     if kind == "fcrm":
-        t, f = fcrm_estimate(x, fs, B, f_scale, **mth.get("params", {}))
+        t, f = fcrm_estimate(x, B, f_scale, **mth.get("params", {}), fs=fs)
         return t, np.abs(f)       # |IF| (one-sided grid; abs is a safeguard)
     raise ValueError(kind)
 
@@ -332,7 +351,7 @@ def run_instance(task):
     for si, snr in enumerate(cfg["snrs_db"]):
         x = add_noise(s, w, snr)
         for j, mth in enumerate(methods):
-            te, fe = apply_method(mth, x, cfg["fs"], B, fsc)[:2]
+            te, fe = apply_method(mth, x, B, fsc, fs=cfg["fs"])[:2]
             _, e = errors(te, fe, f_true, cfg["fs"], cfg["hop"], cfg["edge"],
                           absolute=(kind == "real"), wrap=(kind == "complex"))
             out[si, j] = metrics(e, cfg["trunc_frac"])
@@ -412,46 +431,64 @@ def summarize(res, cfg, methods, metric=1):
 # =========================================================================
 # Signed IF for REAL signals (sign changes = IF zero crossings)
 # =========================================================================
-def turning_points(x, fs, f_lo=50.0, f_hi=None, order=4, env_smooth=0.015,
-                   prominence=0.5, thr=0.6, min_sep=0.03, max_turns=None):
-    """Detect IF sign changes of a real signal from dips of a high-passed
-    envelope.
-
-    The signal is band-pass filtered to [f_lo, f_hi] (Butterworth, zero
-    phase), so while |IF| < f_lo its energy is rejected and the envelope
-    |hilbert(filtered)| dips. The envelope is smoothed (moving average of
-    env_smooth seconds) and divided by its median. A dip is a local minimum
-    whose prominence (depth relative to the surrounding envelope, in units
-    of the median) is >= prominence and whose level is < thr; dips closer
-    than min_sep seconds are merged (scipy.signal.find_peaks on -envelope).
-    max_turns: keep only the max_turns most prominent dips (prior knowledge
-    of the number of sign changes); None or 0 = keep all.
-    Returns t (s), normalized envelope, turning-point sample indices."""
-    from scipy.signal import find_peaks
+def _band_envelope(x, f_lo, f_hi, order, env_smooth, fs):
+    """Envelope |hilbert(.)| of x band-passed to [f_lo, f_hi] (Butterworth,
+    zero phase), smoothed by a moving average of env_smooth (units of 1 / fs).
+    None: f_lo = 0.05 fs, f_hi = 0.45 fs, env_smooth = 15 samples."""
+    f_lo = 0.05 * fs if f_lo is None else f_lo
     f_hi = 0.45 * fs if f_hi is None else f_hi
+    env_smooth = 15 / fs if env_smooth is None else env_smooth
     sos = butter(order, [f_lo, f_hi], btype="bandpass", fs=fs, output="sos")
     env = np.abs(hilbert(sosfiltfilt(sos, x)))
     n = _odd(env_smooth * fs)
     if n > 1:
         env = np.convolve(np.pad(env, n // 2, mode="reflect"), np.ones(n) / n, "valid")
-    env = env / np.median(env)
+    return env
+
+
+def _envelope_dips(env, prominence, thr, min_sep, max_turns, fs):
+    """Dips of the (median-normalized) envelope; min_sep in units of 1 / fs
+    (None: 30 samples)."""
+    from scipy.signal import find_peaks
+    min_sep = 30 / fs if min_sep is None else min_sep
     idx, props = find_peaks(-env, prominence=prominence, height=-thr,
                             distance=max(1, int(min_sep * fs)))
     if max_turns and idx.size > max_turns:
         keep = np.argsort(props["prominences"])[::-1][:max_turns]
         idx = np.sort(idx[keep])
+    return idx
+
+
+def turning_points(x, f_lo=None, f_hi=None, order=4, env_smooth=None,
+                   prominence=0.5, thr=0.6, min_sep=None, max_turns=None, *, fs=1.0):
+    """Detect IF sign changes of a real signal from dips of a high-passed
+    envelope. fs: keyword, default 1; frequencies are in units of fs and
+    times in units of 1 / fs (cycles/sample and samples at fs = 1).
+
+    The signal is band-pass filtered to [f_lo, f_hi] (Butterworth, zero
+    phase; defaults 0.05 fs and 0.45 fs), so while |IF| < f_lo its energy is
+    rejected and the envelope |hilbert(filtered)| dips. The envelope is
+    smoothed (moving average of env_smooth, default 15 samples) and divided
+    by its median. A dip is a local minimum whose prominence (depth relative
+    to the surrounding envelope, in units of the median) is >= prominence and
+    whose level is < thr; dips closer than min_sep (default 30 samples) are
+    merged (scipy.signal.find_peaks on -envelope).
+    max_turns: keep only the max_turns most prominent dips (prior knowledge
+    of the number of sign changes); None or 0 = keep all.
+    Returns t, normalized envelope, turning-point sample indices."""
+    env = _band_envelope(x, f_lo, f_hi, order, env_smooth, fs)
+    env = env / np.median(env)
+    idx = _envelope_dips(env, prominence, thr, min_sep, max_turns, fs)
     return np.arange(x.size) / fs, env, idx
 
-def turning_points_with_locations(x, fs, loc:list=None,
-                               f_lo=50.0, f_hi=None, order=4, env_smooth=0.015,
-                               prominence=0.5, thr=0.6, min_sep=0.03, max_turns=None):
-    from scipy.signal import find_peaks
-    f_hi = 0.45 * fs if f_hi is None else f_hi
-    sos = butter(order, [f_lo, f_hi], btype="bandpass", fs=fs, output="sos")
-    env = np.abs(hilbert(sosfiltfilt(sos, x)))
-    n = _odd(env_smooth * fs)
-    if n > 1:
-        env = np.convolve(np.pad(env, n // 2, mode="reflect"), np.ones(n) / n, "valid")
+
+def turning_points_with_locations(x, loc: list = None, f_lo=None, f_hi=None, order=4,
+                                  env_smooth=None, prominence=0.5, thr=0.6, min_sep=None,
+                                  max_turns=None, *, fs=1.0):
+    """turning_points, or, if loc (sample intervals [idx1, idx2]) is given,
+    one turning point per interval at the minimum of the (not normalized)
+    envelope inside it. Same parameters and units as turning_points."""
+    env = _band_envelope(x, f_lo, f_hi, order, env_smooth, fs)
     if loc:
         idx = []
         for loci in loc:
@@ -461,11 +498,7 @@ def turning_points_with_locations(x, fs, loc:list=None,
             idx.append(tpidx)
     else:
         env = env / np.median(env)
-        idx, props = find_peaks(-env, prominence=prominence, height=-thr,
-                                distance=max(1, int(min_sep * fs)))
-        if max_turns and idx.size > max_turns:
-            keep = np.argsort(props["prominences"])[::-1][:max_turns]
-            idx = np.sort(idx[keep])
+        idx = _envelope_dips(env, prominence, thr, min_sep, max_turns, fs)
     return np.arange(x.size) / fs, env, idx
 
 
@@ -477,24 +510,26 @@ def sign_sequence(n, idx):
     return s
 
 
-def signed_hilbert_estimate(x, fs, B=None, filt=None, sign_before_filter=True,
-                            tp_params=None):
+def signed_hilbert_estimate(x, B=None, filt=None, sign_before_filter=True,
+                            tp_params=None, *, fs=1.0):
     """Signed IF of a real signal: Hilbert phase differences folded into
     [0, fs/2], multiplied by the turning-point sign sequence, low-passed.
+    fs: keyword, default 1 (t in samples, IF in cycles/sample); B and
+    tp_params (turning_points_with_locations keywords) in the same units.
     sign_before_filter=True: sign the raw phase differences, then filter
     (signed noise averages out near 0 Hz); False: filter |IF|, then sign.
     The global sign is left arbitrary (+1 before the first turning point).
     Returns t, signed IF, (t_env, env, turning-point indices)."""
-    t_env, env, idx = turning_points_with_locations(x, fs, **(tp_params or {}))
+    t_env, env, idx = turning_points_with_locations(x, **(tp_params or {}), fs=fs)
     z = hilbert(x)
     # f = np.abs(np.angle(z[1:] * np.conj(z[:-1]))) * fs / TWO_PI
     f = np.angle(z[1:] * np.conj(z[:-1])) * fs / TWO_PI
     t = (np.arange(f.size) + 0.5) / fs
     sg = sign_sequence(x.size, idx)[:-1]
     if sign_before_filter:
-        f = lowpass(sg * f, fs, filt, B)
+        f = lowpass(sg * f, filt, B, fs=fs)
     else:
-        f = sg * lowpass(f, fs, filt, B)
+        f = sg * lowpass(f, filt, B, fs=fs)
     return t, f, (t_env, env, idx)
 
 

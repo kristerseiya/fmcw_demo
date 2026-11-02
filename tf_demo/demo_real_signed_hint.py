@@ -27,10 +27,14 @@ by -1 if that lowers the error (oracle).
 
 Panels: STFT (two-sided) + signed IF overlays | FCRM summed over chirp rate |
 band-passed envelope with true sign changes and hint intervals | signed error.
+The signal is simulated at --fs (Hz); the estimators run at their default
+fs = 1, so their parameters are in samples and cycles/sample (hint margin and
+jitter, f_lo, envelope smoothing, min separation) and the GP prior is passed
+as B / fs. Results are converted back to s and Hz for display and scoring.
 Adjust sliders / radio buttons, then press "Run".
 
   python demo_real_signed_hint.py
-  python demo_real_signed_hint.py --B 2 --seed 2 --margin-ms 80 --jitter-ms 20
+  python demo_real_signed_hint.py --B 2 --seed 2 --margin 80 --jitter 20
   python demo_real_signed_hint.py --hint-source detected --save hint.png   # no window
 """
 import argparse
@@ -86,30 +90,33 @@ def compute(p):
     s = np.cos(L.phase_from_if(f, fs, rng.uniform(0, 2 * np.pi)))
     x = L.add_noise(s, L.unit_noise(rng, n, False), p["snr"])
     zc = np.nonzero(np.diff(np.sign(f)) != 0)[0]
+    B_n, f_scale_n = p["B"] / fs, f_scale / fs          # estimators at fs = 1: cycles/sample
 
-    tp = dict(f_lo=p["f_lo"], order=p["bp_order"], env_smooth=p["env_smooth_ms"] / 1e3,
-              prominence=p["prominence"], thr=p["thr"], min_sep=p["min_sep_ms"] / 1e3)
-    te, env, dips = L.turning_points(x, fs, **tp)
+    tp = dict(f_lo=p["f_lo"], order=p["bp_order"], env_smooth=p["env_smooth"],
+              prominence=p["prominence"], thr=p["thr"], min_sep=p["min_sep"])
+    te, env, dips = L.turning_points(x, **tp)
+    te = te / fs                                        # samples -> s
     if p["source"] == "true":
         jit = np.random.default_rng([p["seed"], 1]).uniform(-1, 1, zc.size)   # signal unchanged
-        centres = zc + jit * p["jitter_ms"] * fs / 1e3
+        centres = zc + jit * p["jitter"]
     else:
         centres = dips
-    iv = hint_intervals(centres, p["margin_ms"] * fs / 1e3, n)
+    iv = hint_intervals(centres, p["margin"], n)
 
     filt = None if p["lp_type"] == "none" else dict(type=p["lp_type"], fc_rel=p["lp_fc_rel"])
     t0 = time.perf_counter()
-    th, fh, (_, _, idx_h) = L.signed_hilbert_estimate(x, fs, p["B"], filt, True, dict(tp, loc=iv))
+    th, fh, (_, _, idx_h) = L.signed_hilbert_estimate(x, B_n, filt, True, dict(tp, loc=iv))
     t1 = time.perf_counter()
     fk = dict(sigma=p["sigma"], lam_f=10 ** p["log_lam_f"], lam_c=10 ** p["log_lam_c"],
               mode=p["mode"], prediction=p["prediction"], onesided=False, n_omega_out=512)
-    tc, fc, _, tfr = L.fcrm_estimate(x, fs, p["B"], f_scale, return_tfr=True, **fk)
+    tc, fc, _, tfr = L.fcrm_estimate(x, B_n, f_scale_n, return_tfr=True, **fk)
     t2 = time.perf_counter()
+    th, fh, tc, fc = th / fs, fh * fs, tc / fs, fc * fs   # samples -> s, cycles/sample -> Hz
     lam_cross = 10 ** p["log_lam_c"] if p["cr_cross"] == "λ chirp" else 0.0
     try:
-        tz, fz = L.fcrm_estimate(x, fs, p["B"], f_scale, zero_crossings=iv, hold_sign=p["hold"],
+        tz, fz = L.fcrm_estimate(x, B_n, f_scale_n, zero_crossings=iv, hold_sign=p["hold"],
                                  lam_c_cross=lam_cross, **fk)
-        fail = None
+        tz, fz, fail = tz / fs, fz * fs, None
     except ValueError as e:                     # infeasible hints (e.g. interval too short)
         tz, fz, fail = tc, np.full_like(fc, np.nan), str(e)
     t3 = time.perf_counter()
@@ -172,9 +179,9 @@ def draw(axs, res, p):
             label=f"Hilbert turning points ({idx.size} vs {len(res['zc'])} true)")
     a2.set_ylim(0, max(2.5, 1.1 * np.percentile(res["env"], 99)))
     a2.set_xlim(0, p["duration"])
-    src = (f"true sign changes, jitter ±{p['jitter_ms']:.0f} ms" if p["source"] == "true"
+    src = (f"true sign changes, jitter ±{p['jitter']:.0f} samples" if p["source"] == "true"
            else f"envelope dips (prominence {p['prominence']:.2f}, cap {p['thr']:.2f})")
-    a2.set_title(f"hints: {len(res['iv'])} intervals, ±{p['margin_ms']:.0f} ms around {src}",
+    a2.set_title(f"hints: {len(res['iv'])} intervals, ±{p['margin']:.0f} samples around {src}",
                  fontsize=9)
     a2.set_xlabel("time (s)"); a2.legend(**LEGEND)
 
@@ -203,9 +210,10 @@ def main():
     ap.add_argument("--seed", type=int, default=5)
     # hints
     ap.add_argument("--hint-source", default="true", choices=["true", "detected"])
-    ap.add_argument("--margin-ms", type=float, default=50.0, help="interval = centre +/- margin")
-    ap.add_argument("--jitter-ms", type=float, default=0.0,
-                    help="random shift of the true centres (hint source 'true')")
+    ap.add_argument("--margin", type=float, default=50.0,
+                    help="interval = centre +/- margin (samples)")
+    ap.add_argument("--jitter", type=float, default=0.0,
+                    help="random shift of the true centres (samples, hint source 'true')")
     ap.add_argument("--no-hold", action="store_true",
                     help="enforce only the flip across each interval, not a fixed sign elsewhere")
     ap.add_argument("--cr-cross", default="free", choices=["free", "lam-c"],
@@ -219,15 +227,19 @@ def main():
     # Hilbert IF filter
     ap.add_argument("--lp-type", default="fir", choices=["none", "fir", "ma", "butter"])
     ap.add_argument("--lp-fc-rel", type=float, default=4.0, help="cutoff = this * B")
-    # envelope (detected hints, display)
-    ap.add_argument("--f-lo", type=float, default=50.0, help="band-pass low edge (Hz)")
+    # envelope (detected hints, display; estimator units: cycles/sample, samples)
+    ap.add_argument("--f-lo", type=float, default=0.05,
+                    help="band-pass low edge (cycles/sample; 0.05 = 50 Hz at fs = 1 kHz)")
     ap.add_argument("--bp-order", type=int, default=4)
-    ap.add_argument("--env-smooth-ms", type=float, default=15.0)
+    ap.add_argument("--env-smooth", type=float, default=15.0,
+                    help="envelope moving-average length (samples)")
     ap.add_argument("--prominence", type=float, default=0.5)
     ap.add_argument("--thr", type=float, default=0.6, help="dip level cap (x median)")
-    ap.add_argument("--min-sep-ms", type=float, default=30.0)
+    ap.add_argument("--min-sep", type=float, default=30.0,
+                    help="minimum separation of detected dips (samples)")
     # signal / display
-    ap.add_argument("--fs", type=float, default=1000.0)
+    ap.add_argument("--fs", type=float, default=1000.0,
+                    help="simulation sampling rate (Hz); the estimators run at fs = 1")
     ap.add_argument("--duration", type=float, default=4.0)
     ap.add_argument("--f-center", type=float, default=0.0)
     ap.add_argument("--if-extent", type=float, default=0.4)
@@ -242,14 +254,14 @@ def main():
     import matplotlib.pyplot as plt
     from matplotlib.widgets import Slider, Button, RadioButtons, CheckButtons
 
-    p = dict(B=a.B, snr=a.snr, seed=a.seed, source=a.hint_source, margin_ms=a.margin_ms,
-             jitter_ms=a.jitter_ms, hold=not a.no_hold,
+    p = dict(B=a.B, snr=a.snr, seed=a.seed, source=a.hint_source, margin=a.margin,
+             jitter=a.jitter, hold=not a.no_hold,
              cr_cross="free" if a.cr_cross == "free" else "λ chirp",
              sigma=a.sigma, log_lam_f=np.log10(a.lam_f), log_lam_c=np.log10(a.lam_c),
              mode=a.mode, prediction=not a.no_prediction, lp_type=a.lp_type,
              lp_fc_rel=a.lp_fc_rel, f_lo=a.f_lo, bp_order=a.bp_order,
-             env_smooth_ms=a.env_smooth_ms, prominence=a.prominence, thr=a.thr,
-             min_sep_ms=a.min_sep_ms, fs=a.fs, duration=a.duration, f_center=a.f_center,
+             env_smooth=a.env_smooth, prominence=a.prominence, thr=a.thr,
+             min_sep=a.min_sep, fs=a.fs, duration=a.duration, f_center=a.f_center,
              if_extent=a.if_extent, edge=a.edge, stft_len=a.stft_len, cmap=a.cmap,
              dyn_range=a.dyn_range, show=dict(truth=True, h=True, c=True, z=True))
 
@@ -269,17 +281,17 @@ def main():
         ("log_B", "log10 B (Hz)", -1.0, 1.5, np.log10(p["B"]), None),
         ("snr", "SNR (dB)", -10, 40, p["snr"], 1),
         ("seed", "seed", 0, 99, p["seed"], 1),
-        ("margin_ms", "hint margin (ms)", 5, 300, p["margin_ms"], 5),
-        ("jitter_ms", "hint jitter (ms, true)", 0, 200, p["jitter_ms"], 5),
+        ("margin", "hint margin (samples)", 5, 300, p["margin"], 5),
+        ("jitter", "hint jitter (samples, true)", 0, 200, p["jitter"], 5),
         ("sigma", "FCRM σ (samples)", 3, 20, p["sigma"], 0.5),
         ("log_lam_f", "log10 λ freq", -4, 1, p["log_lam_f"], 0.1),
         ("log_lam_c", "log10 λ chirp", -4, 1, p["log_lam_c"], 0.1),
         ("lp_fc_rel", "Hilbert LP cutoff / B", 0.5, 12, p["lp_fc_rel"], 0.5),
-        ("f_lo", "band-pass f_lo (Hz)", 5, 200, p["f_lo"], 1),
-        ("env_smooth_ms", "envelope smooth (ms)", 1, 60, p["env_smooth_ms"], 1),
+        ("f_lo", "band-pass f_lo (cyc/sample)", 0.005, 0.2, p["f_lo"], 0.001),
+        ("env_smooth", "envelope smooth (samples)", 1, 60, p["env_smooth"], 1),
         ("prominence", "dip prominence", 0.05, 2.0, p["prominence"], 0.05),
         ("thr", "dip level cap", 0.1, 1.5, p["thr"], 0.05),
-        ("min_sep_ms", "min separation (ms)", 5, 300, p["min_sep_ms"], 5),
+        ("min_sep", "min separation (samples)", 5, 300, p["min_sep"], 5),
         ("stft_len", "display STFT len", 16, 512, p["stft_len"], 16),
     ]
     sliders = {}
@@ -310,13 +322,13 @@ def main():
 
     def run(_=None):
         p.update(B=10 ** sliders["log_B"].val, snr=sliders["snr"].val,
-                 seed=int(sliders["seed"].val), margin_ms=sliders["margin_ms"].val,
-                 jitter_ms=sliders["jitter_ms"].val, sigma=sliders["sigma"].val,
+                 seed=int(sliders["seed"].val), margin=sliders["margin"].val,
+                 jitter=sliders["jitter"].val, sigma=sliders["sigma"].val,
                  log_lam_f=sliders["log_lam_f"].val, log_lam_c=sliders["log_lam_c"].val,
                  lp_fc_rel=sliders["lp_fc_rel"].val, f_lo=sliders["f_lo"].val,
-                 env_smooth_ms=sliders["env_smooth_ms"].val,
+                 env_smooth=sliders["env_smooth"].val,
                  prominence=sliders["prominence"].val, thr=sliders["thr"].val,
-                 min_sep_ms=sliders["min_sep_ms"].val, stft_len=int(sliders["stft_len"].val),
+                 min_sep=sliders["min_sep"].val, stft_len=int(sliders["stft_len"].val),
                  source=rad_src.value_selected, hold=rad_hold.value_selected == "on",
                  cr_cross=rad_cr.value_selected, mode=rad_mode.value_selected,
                  prediction=rad_pred.value_selected == "on")

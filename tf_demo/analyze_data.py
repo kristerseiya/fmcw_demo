@@ -137,7 +137,7 @@ def run_fsst(x, fs, p, onesided):
     max_jump = p["max_jump_hz"] or max_chirp * hop / fs + 3 * df
     remove = p["remove_hz"] or 2 * fs / (2 * np.pi * sigma)
     t, IF, _, tfr = CR.estimate_ifs(
-        x, fs, n_components=p["n_ridges"], sigma=sigma, hop=hop, nfft=L._nfft_for(sigma),
+        x, fs=fs, n_components=p["n_ridges"], sigma=sigma, hop=hop, nfft=L._nfft_for(sigma),
         n_omega_out=K, mode="fsst", onesided=onesided, ridge="dp", lam_k=p["fsst_lam"],
         max_dk=int(np.ceil(max_jump / df)), prediction=False, r_k=8, r_b=1,
         remove=(max(1, int(round(remove / df))), 0), blur=(1.0, 0.0), readout_cells=(2, 0),
@@ -156,7 +156,7 @@ def run_fcrm(x, fs, p, onesided):
     remove = p["remove_hz"] or 2 * fs / (2 * np.pi * sigma)
     remove_c = p["remove_chirp"] or max_chirp / 6
     t, IF, CRt, tfr = CR.estimate_ifs(
-        x, fs, n_components=p["n_ridges"], sigma=sigma, hop=hop, nfft=L._nfft_for(sigma),
+        x, fs=fs, n_components=p["n_ridges"], sigma=sigma, hop=hop, nfft=L._nfft_for(sigma),
         n_beta_in=16, beta_max_hz_s=max_chirp, n_omega_out=K, n_beta_out=Bn,
         mode=p["fcrm_mode"], onesided=onesided, ridge="dp", lam_k=p["fcrm_lam_f"],
         lam_b=p["fcrm_lam_c"], max_dk=int(np.ceil(max_jump / df)), max_db=max(2, Bn // 4),
@@ -170,7 +170,7 @@ def run_pd(x, fs, p, is_real):
     filt = None if p["pd_lp_type"] == "none" else dict(
         type=p["pd_lp_type"], fc=p["pd_lp_fc"], len=(p["pd_lp_len"] or None))
     fold = None if (not is_real or p["pd_fold"] == "none") else p["pd_fold"]
-    t, f = L.phasediff_estimate(x, fs, None, filt, "freq", analytic=is_real, fold=fold)
+    t, f = L.phasediff_estimate(x, None, filt, "freq", analytic=is_real, fold=fold, fs=fs)
     return dict(t=t, IF=f[None, :])
 
 

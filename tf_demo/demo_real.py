@@ -11,6 +11,9 @@ IF: rect-PSD GP mapped onto [f_center - 0.4 fs, f_center + 0.4 fs] (default
 centre 0). A real signal cannot reveal the sign of the IF: errors are
 estimate - |IF|, with |FCRM estimate| and the Hilbert phase differences
 wrapped (folded) into [0, fs/2] ("pre": before filtering, "post": after).
+The signal is simulated at --fs (Hz); the estimators run at their default
+fs = 1 (samples, cycles/sample), with the GP prior passed as B / fs, and the
+results are converted back to s, Hz and Hz/s for display and scoring.
 Adjust the sliders / radio buttons, then press "Run".
 
   python demo_real.py                          # interactive window
@@ -54,18 +57,20 @@ def compute(p):
     f_scale = p["if_extent"] * fs / 2
     s = np.cos(L.phase_from_if(f, fs, rng.uniform(0, 2 * np.pi)))
     x = L.add_noise(s, L.unit_noise(rng, n, False), p["snr"])
+    B_n, f_scale_n = p["B"] / fs, f_scale / fs          # estimators at fs = 1: cycles/sample
     filt = None if p["lp_type"] == "none" else dict(
         type=p["lp_type"], fc_rel=p["lp_fc_rel"], len=(p["lp_len"] or None))
     t0 = time.perf_counter()
-    th, fh = L.phasediff_estimate(x, fs, p["B"], filt, p["domain"], analytic=True,
+    th, fh = L.phasediff_estimate(x, B_n, filt, p["domain"], analytic=True,
                                   fold=None if p["fold"] == "none" else p["fold"])
     t1 = time.perf_counter()
-    tc, fc, cr, tfr = L.fcrm_estimate(x, fs, p["B"], f_scale, sigma=p["sigma"],
+    tc, fc, cr, tfr = L.fcrm_estimate(x, B_n, f_scale_n, sigma=p["sigma"],
                                       lam_f=10 ** p["log_lam_f"], lam_c=10 ** p["log_lam_c"],
                                       mode=p["mode"], prediction=p["prediction"],
                                       return_tfr=True)
     t2 = time.perf_counter()
-    fc = np.abs(fc)
+    th, fh = th / fs, fh * fs                           # samples -> s, cycles/sample -> Hz
+    tc, fc, cr = tc / fs, np.abs(fc) * fs, cr * fs ** 2  # ... and cycles/sample^2 -> Hz/s
     res = dict(t=np.arange(n) / fs, f=f, x=x, th=th, fh=fh, tc=tc, fc=fc, cr=cr, tfr=tfr,
                f_scale=f_scale,
                time_h=t1 - t0, time_c=t2 - t1)
@@ -158,7 +163,8 @@ def main():
     ap.add_argument("--lp-fc-rel", type=float, default=4.0, help="cutoff = this * B")
     ap.add_argument("--domain", default="freq", choices=["freq", "phasor"])
     ap.add_argument("--stft-len", type=int, default=128, help="display STFT window")
-    ap.add_argument("--fs", type=float, default=1000.0)
+    ap.add_argument("--fs", type=float, default=1000.0,
+                    help="simulation sampling rate (Hz); the estimators run at fs = 1")
     ap.add_argument("--duration", type=float, default=4.0)
     ap.add_argument("--f-center", type=float, default=0.0, help="centre of the IF range (Hz)")
     ap.add_argument("--if-extent", type=float, default=0.4,

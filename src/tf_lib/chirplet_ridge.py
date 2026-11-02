@@ -3,7 +3,12 @@ Frequency-chirprate reassignment (FCRM, Zhu et al., "Frequency-Chirprate
 Reassignment") with 3-D ridge detection.
 
 Units: omega in rad/sample, beta (chirp rate) in rad/sample^2, sigma in
-samples. Public helpers convert to Hz and Hz/s.
+samples. The end-to-end estimators (estimate_ifs, estimate_if_chirplet) take
+the sampling rate as an optional keyword fs (default 1): times are returned in
+units of 1 / fs, IF in units of fs and chirp rate in units of fs^2, i.e.
+samples, cycles/sample and cycles/sample^2 by default (s, Hz, Hz/s when the
+true fs is given). All other parameters are in samples / bins, independent
+of fs.
 
 Chirplet transform (paper eq. 2, Gaussian window):
     C(t, w, b) = sum_tau x[t + tau] g(tau) exp(-j b tau^2 / 2) exp(-j w tau)
@@ -526,14 +531,19 @@ def readout(tfr, kp, bp, dk=2, db=2):
 # =========================================================================
 # End-to-end
 # =========================================================================
-def estimate_ifs(x, fs, n_components=1, sigma=10.0, hop=4, nfft=128,
+def estimate_ifs(x, n_components=1, sigma=10.0, hop=4, nfft=128,
                  n_beta_in=16, beta_max_hz_s=None, n_omega_out=256,
                  n_beta_out=64, mode="joint", gamma=1e-2, onesided=None,
                  ridge="dp", lam_k=0.05, lam_b=0.05, max_dk=None, max_db=4,
                  prediction=True, r_k=8, r_b=4, remove=(6, 6), blur=(1.0, 1.0),
                  readout_cells=(2, 2), n_init=10, energy="log", return_tfr=False,
-                 reassign=None, zero_crossings=None, hold_sign=True, lam_b_cross=0.0):
-    """IF (Hz) and chirp rate (Hz/s) of n_components ridges.
+                 reassign=None, zero_crossings=None, hold_sign=True, lam_b_cross=0.0,
+                 *, fs=1.0):
+    """IF and chirp rate of n_components ridges.
+    fs: sampling rate (keyword, default 1). It only sets the units of the
+    output (t in 1 / fs, IF in fs, chirp rate in fs^2: samples, cycles/sample,
+    cycles/sample^2 by default) and of beta_max_hz_s (in fs^2; default
+    pi / (4 sigma) rad/sample^2, i.e. 1 / (8 sigma) cycles/sample^2).
     onesided: restrict to positive frequencies (default: True for real x
     without zero_crossings).
     reassign: function computing the transform (default chirplet_reassign), e.g.
@@ -550,7 +560,7 @@ def estimate_ifs(x, fs, n_components=1, sigma=10.0, hop=4, nfft=128,
     interval is enforced.
     lam_b_cross: chirp-rate penalty (per bin^2) inside the intervals, replacing
     lam_b there; 0 (default) leaves the chirp rate free. max_db never applies there.
-    Returns t (s), IF (n_components, T), CR (n_components, T) [, tfr]."""
+    Returns t, IF (n_components, T), CR (n_components, T) [, tfr]."""
     if onesided is None:
         onesided = np.isrealobj(x) and zero_crossings is None
     beta_max = None if beta_max_hz_s is None else beta_max_hz_s * TWO_PI / fs ** 2
@@ -575,9 +585,9 @@ def estimate_ifs(x, fs, n_components=1, sigma=10.0, hop=4, nfft=128,
     return out
 
 
-def estimate_if_chirplet(x, fs, **kw):
-    """Single-component convenience wrapper (backwards compatible)."""
-    ret = estimate_ifs(x, fs, n_components=1, **kw)
+def estimate_if_chirplet(x, **kw):
+    """Single-component convenience wrapper of estimate_ifs (fs: keyword, default 1)."""
+    ret = estimate_ifs(x, n_components=1, **kw)
     t, IF, CR = ret[:3]
     return (t, IF[0], CR[0]) + tuple(ret[3:])
 

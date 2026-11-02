@@ -9,7 +9,9 @@ equations are numbered (1)–(24) and follow the code in
 ## Quick start
 
 The demo's default run (B = 1 Hz, SNR 10 dB, seed 5, hints at the true sign
-changes ± 50 ms) in a few lines:
+changes ± 50 samples) in a few lines. The estimators run at their default
+fs = 1 (times in samples, frequencies in cycles/sample), so the GP prior is
+passed as B / fs and the result is converted back to s and Hz:
 
 ```python
 import numpy as np
@@ -22,10 +24,11 @@ x = L.add_noise(np.cos(L.phase_from_if(f, fs, rng.uniform(0, 2 * np.pi))),
                 L.unit_noise(rng, n, False), snr)               # real signal
 
 zc = np.nonzero(np.diff(np.sign(f)) != 0)[0]                    # true sign changes (samples)
-hints = [(c - 50, c + 50) for c in zc]                          # +/- 50 ms at fs = 1 kHz
+hints = [(c - 50, c + 50) for c in zc]                          # +/- 50 samples
 
-t, IF = L.fcrm_estimate(x, fs, B, f_scale=0.4 * fs / 2, onesided=False, n_omega_out=512,
-                        zero_crossings=hints)
+t, IF = L.fcrm_estimate(x, B / fs, f_scale=0.4 / 2, onesided=False, n_omega_out=512,
+                        zero_crossings=hints)                   # fs = 1: samples, cycles/sample
+t, IF = t / fs, IF * fs                                         # -> s, Hz
 
 _, IF = L.best_global_sign(t, IF, f, fs)                        # oracle global sign
 _, e = L.errors(t, IF, f, fs)
@@ -40,8 +43,13 @@ without that prior, call the core function directly:
 
 ```python
 import tf_lib.chirplet_ridge as CRM
-t, IF, chirp = CRM.estimate_ifs(x, fs, zero_crossings=[(idx1, idx2), ...])   # IF[0] in Hz
+t, IF, chirp = CRM.estimate_ifs(x, zero_crossings=[(idx1, idx2), ...])  # samples, cycles/sample
 ```
+
+Pass `fs=...` (keyword) to either function to work in s, Hz and Hz/s
+instead (the prior `B`, `f_scale` of `fcrm_estimate` then in Hz too);
+`sigma`, `hop`, the penalties and the hint intervals are in samples / bins
+either way.
 
 `onesided` defaults to `False` when `zero_crossings` is given.
 
@@ -477,7 +485,7 @@ $$
 \begin{aligned}
 s_{\text{std}} &= f_{\text{scale}}\,\frac{2\pi B_{\text{GP}}}{\sqrt3}\ \ \text{(Hz/s)},
 &\qquad c_{\text{std}} &= f_{\text{scale}}\,\frac{(2\pi B_{\text{GP}})^2}{\sqrt5}\ \ \text{(Hz/s}^2\text{)}, \\
-\beta_{\max} &= \max(200,\ 4\,s_{\text{std}})\ \ \text{(Hz/s)},
+\beta_{\max} &= \max(2\cdot10^{-4} f_s^2,\ 4\,s_{\text{std}})\ \ \text{(Hz/s)},
 &\qquad \Delta\beta &= \frac{2\beta_{\max}}{n_\beta-1},\qquad \Delta f = \frac{f_s}{K}, \\
 D_k &= \Bigl\lceil \frac{6\,s_{\text{std}}\,h}{f_s\,\Delta f} \Bigr\rceil + 4,
 &\qquad D_b &= \min\Bigl(\Bigl\lceil \frac{6\,c_{\text{std}}\,h}{f_s\,\Delta\beta} \Bigr\rceil + 2,\ n_\beta-1\Bigr).
@@ -486,7 +494,10 @@ D_k &= \Bigl\lceil \frac{6\,s_{\text{std}}\,h}{f_s\,\Delta f} \Bigr\rceil + 4,
 $$
 
 Demo defaults: $f_{\text{scale}} = 0.4 f_s/2 = 200$ Hz, $B_{\text{GP}} = 1$ Hz,
-$\lambda_k = 0.05$, $\lambda_b = 0.3$.
+$\lambda_k = 0.05$, $\lambda_b = 0.3$. The demo calls `fcrm_estimate` at
+$f_s = 1$ with $B_{\text{GP}}/f_s$ and $f_{\text{scale}}/f_s$, which gives the
+same grid and limits; the table lists them in Hz for the simulated
+$f_s$ = 1 kHz.
 
 | quantity | value |
 |---|---|
@@ -589,13 +600,13 @@ Hint intervals are shaded.
 | control | CLI flag | effect |
 |---|---|---|
 | hint source | `--hint-source {true,detected}` | centres in eq. (22): true sign changes, or envelope dips |
-| hint margin | `--margin-ms` | $M$ in eq. (22) |
-| hint jitter | `--jitter-ms` | $\delta$ in eq. (22) |
+| hint margin | `--margin` (samples) | $M$ in eq. (22) |
+| hint jitter | `--jitter` (samples) | $\delta$ in eq. (22) |
 | hold sign | `--no-hold` | drop (11b) |
 | CR in interval | `--cr-cross {free,lam-c}` | $\lambda_b^{\times} = 0$ or $\lambda_b$ in eq. (10) |
 
 ```
 python tf_demo/demo_real_signed_hint.py
-python tf_demo/demo_real_signed_hint.py --B 2 --seed 2 --margin-ms 80 --jitter-ms 30
+python tf_demo/demo_real_signed_hint.py --B 2 --seed 2 --margin 80 --jitter 30
 python tf_demo/demo_real_signed_hint.py --hint-source detected --save hint.png
 ```

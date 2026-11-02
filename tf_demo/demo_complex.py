@@ -5,6 +5,9 @@ FSST + coarse-to-fine 2-D ridge.
 
 Panels: spectrogram with true IF and both estimates overlaid | FSST map
 with its ridge | error vs time (RMSE and truncated RMSE in the legend).
+The signal is simulated at --fs (Hz); the estimators run at their default
+fs = 1 (samples, cycles/sample), with the GP prior passed as B / fs, and the
+results are converted back to s and Hz for display and scoring.
 Adjust the sliders / radio buttons, then press "Run".
 
   python demo_complex.py                       # interactive window
@@ -47,15 +50,17 @@ def compute(p):
     f = L.if_complex(rng, n, fs, p["B"], p["if_extent"])
     s = np.exp(1j * L.phase_from_if(f, fs, rng.uniform(0, 2 * np.pi)))
     x = L.add_noise(s, L.unit_noise(rng, n, True), p["snr"])
-    f_scale = p["if_extent"] * fs / 2
+    # estimators at fs = 1: prior in cycles/sample (IF range ~ 4 std -> scale = extent / 2)
+    B_n, f_scale_n = p["B"] / fs, p["if_extent"] / 2
     filt = None if p["lp_type"] == "none" else dict(
         type=p["lp_type"], fc_rel=p["lp_fc_rel"], len=(p["lp_len"] or None))
     t0 = time.perf_counter()
-    tp, fp = L.phasediff_estimate(x, fs, p["B"], filt, p["domain"])
+    tp, fp = L.phasediff_estimate(x, B_n, filt, p["domain"])
     t1 = time.perf_counter()
-    ts, fsst, tfr = L.fsst_estimate(x, fs, p["B"], f_scale, sigma=p["sigma"],
+    ts, fsst, tfr = L.fsst_estimate(x, B_n, f_scale_n, sigma=p["sigma"],
                                     lam=10 ** p["log_lam"], return_tfr=True)
     t2 = time.perf_counter()
+    tp, fp, ts, fsst = tp / fs, fp * fs, ts / fs, fsst * fs   # samples -> s, cycles/sample -> Hz
     res = dict(t=np.arange(n) / fs, f=f, x=x, tp=tp, fp=fp, ts=ts, fs_est=fsst, tfr=tfr,
                time_pd=t1 - t0, time_sst=t2 - t1)
     for k, (te, fe) in (("pd", (tp, fp)), ("sst", (ts, fsst))):
@@ -128,7 +133,8 @@ def main():
     ap.add_argument("--lp-fc-rel", type=float, default=4.0, help="cutoff = this * B")
     ap.add_argument("--domain", default="freq", choices=["freq", "phasor"])
     ap.add_argument("--stft-len", type=int, default=128, help="display STFT window")
-    ap.add_argument("--fs", type=float, default=1000.0)
+    ap.add_argument("--fs", type=float, default=1000.0,
+                    help="simulation sampling rate (Hz); the estimators run at fs = 1")
     ap.add_argument("--duration", type=float, default=4.0)
     ap.add_argument("--if-extent", type=float, default=0.4)
     ap.add_argument("--edge", type=float, default=0.3)

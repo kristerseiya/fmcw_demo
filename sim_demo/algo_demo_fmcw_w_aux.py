@@ -187,7 +187,8 @@ plt.title("Basis Pursuit with auxiliary")
 plt.tight_layout()
 
 print("subtracting strong reflections")
-strong_ift, strong_ifq = fmcw_aux.estimate_if_fcrm(y)
+zero_crossings = [(0,400), (1800,2200), (3800,4200), (5800,6200), (7800,8200), (9800,10200)]
+strong_ift, strong_ifq = fmcw_aux.estimate_if_fcrm(y, zero_crossings=zero_crossings)
 strong_ift *= 1/sample_rate
 strong_ifq *= sample_rate
 ifq_resamp = np.interp(strong_ift, ift, ifq)

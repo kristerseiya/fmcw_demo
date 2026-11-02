@@ -2,49 +2,29 @@
 import numpy as np
 import chirpgen
 import matplotlib.pyplot as plt
+from chirpgen.generator import generate_noise_from_psd
+from scipy.fft import fftfreq
 
-modulation = "sinusoidal"
-Tchirp = 1e-6
-Trep = 2e-6
 sample_rate = 1e9
-B = 3e9
-K = 1
+ts = np.arange(0, 3000)/sample_rate
 phase_noise_stdv = 4
 awgn_stdv = 1
+delays = np.arange(1, 500)
+middle = slice(500, 2500)
 
 def psd_fun(f):
     return (np.abs(f)<0.005*sample_rate)
+def generate_diff_matrix(delay):
+    
 
-config = chirpgen.ChirpGeneratorConfig(Tchirp=Tchirp,
-                                    Trep=Trep, 
-                                    sample_rate=sample_rate,
-                                    bandwidth=B,
-                                    modulation=modulation,
-                                    generation_type="continuous",
-                                    lambd_c=1e-3,
-                                    dechirp=True,
-                                    phase_noise_stdv=B*0.01,
-                                    additive_noise_stdv=awgn_stdv,
-                                    distance_fall_off=False,
-                                    phase_noise_type="stationary_freq_from_psd",
-                                    psd_fun=psd_fun,
-                                    complex_valued=True,
-                                    transmitted_power=1,
-                                    )
+psd = psd_fun(fftfreq(len(ts))*sample_rate)
+psd = psd / np.sum(psd) * phase_noise_stdv**2
+gen_noise = generate_noise_from_psd(psd)
 
-generator = chirpgen.ChirpGenerator(config)
-t = np.arange(0, Trep, 1/sample_rate)
-            
-delays = np.random.rand(K) * Trep
-distance = delays * 3e8 / 2
-normalized_delay = delays / Trep
+for d in delays:
+    delayed_gen_noise = np.roll(gen_noise, (d,))
+    obs_noise = (gen_noise - delayed_gen_noise)[middle]
 
-y, (phase_noise_ts, phase_noise) = generator.generate(t, distance, reflection_coef=1, return_phasenoise=True)
-
-deriv_noise = np.diff(phase_noise)/np.diff(phase_noise_ts)
-print(np.std(deriv_noise))
 plt.subplot(2,1,1)
-plt.plot(phase_noise_ts, phase_noise)
-plt.subplot(2,1,2)
-plt.plot(deriv_noise)
+plt.plot(gen_noise)
 plt.show()

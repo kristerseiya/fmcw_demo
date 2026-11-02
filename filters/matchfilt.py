@@ -40,7 +40,7 @@ class SignalModel():
     def get_complex_waveform(self, t:np.ndarray):
         if self.model_type == "inst_freq":
             ifq = np.interp(t, self.t, self.inst_freq, period=self.period)
-            phase = (2*np.pi)*scipy.integrate.cumulative_simpson(ifq, x=t, dx=t[1]-t[0])
+            phase = (2*np.pi)*scipy.integrate.cumulative_simpson(ifq, x=t, dx=t[1]-t[0], initial=0)
             return np.exp(1j*phase)
         elif self.model_type == "phase":
             raise NotImplementedError()

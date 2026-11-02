@@ -19,6 +19,8 @@ sample_rate = 1e9
 bandwidth = 10e9
 K = 3
 
+algo.sparse.VERBOSE = True
+
 def psd_fun(f):
     return (np.abs(f)<0.005*sample_rate)
 
@@ -49,11 +51,11 @@ y = generator.generate(t, distance,reflection_coef=refl)
 
 model = SignalModel(config, model_type="config")
 M = np.ceil(bandwidth/sample_rate).astype(int)*10
-normalized_delays, amplitude, mf0 = algo.sparse.matching_pursuit(model, t, y, M, refine=False, 
-                                                            orthogonalize=False, n_iter=3, 
+normalized_delays, amplitude, mf0 = algo.sparse.matching_pursuit(model, t, y, M, refine=True, 
+                                                            orthogonalize=True, n_iter=3, 
                                                             get_first_mf_response=True)
 
-lasso_amp = algo.sparse.basis_pursuit(model, t, y, M, lambd=10, gamma=1, n_iter=100, regularization="l1")
+lasso_amp = algo.sparse.basis_pursuit_faster(model, t, y, M, lambd=100, rho=1000, n_iter=100, regularization="l1", tol=1e-7)
 
 plt.subplot(121)
 f, t, x = time_freq.short_time_fourier_transform(y, 32, 8, zero_pad=512-32)
@@ -61,7 +63,7 @@ plt.pcolormesh(t, f, np.abs(x))
 
 plt.subplot(122)
 plt.stem(normalized_delays, np.abs(amplitude), linefmt='g--', markerfmt='o', basefmt=' ', label="omp")
-plt.plot(np.arange(len(mf0))/(len(mf0)/len(y)), mf0, label="omp", color="green")
+plt.plot(np.arange(len(mf0))/(len(mf0)/len(y)), mf0, label="mf", color="green")
 plt.plot(np.arange(len(lasso_amp))/M,np.abs(lasso_amp), zorder=3, marker='o', markersize=1, label="bp", color="blue")
 
 plt.vlines((distance*2/3e8*sample_rate), ymin=0, ymax=1, linestyle="-", color="red", zorder=1, label="true")

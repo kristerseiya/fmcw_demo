@@ -72,9 +72,17 @@ def matching_pursuit(signal_model:SignalModel,
                 # mf_output[i] = 0
                 mf_output[(i-mask_len):(i+mask_len+1)] = 0
         if apply_mask:
-            argmax_idx = np.argmax(mf_output)
-        else:
+            if np.all(mf_output[mask]==0):
+                if verbose or VERBOSE:
+                    print("no more points to select...")
+                break
             argmax_idx = np.argmax(mf_output[mask]) + idx0
+        else:
+            if np.all(mf_output==0):
+                if verbose or VERBOSE:
+                    print("no more points to select...")
+                break
+            argmax_idx = np.argmax(mf_output)
         argmaxes.append(argmax_idx)
         delays_coarse.append(argmax_idx*1.0/uprate)
         if refine:
@@ -183,9 +191,17 @@ def bartlett_matching_pursuit(signal_model:SignalModel,
                 # mf_output[i] = 0
                 mf_output[(i-mask_len):(i+mask_len+1)] = 0
         if apply_mask:
-            argmax_idx = np.argmax(mf_output)
-        else:
+            if np.all(mf_output[mask]==0):
+                if verbose or VERBOSE:
+                    print("no more points to select...")
+                break
             argmax_idx = np.argmax(mf_output[mask]) + idx0
+        else:
+            if np.all(mf_output==0):
+                if verbose or VERBOSE:
+                    print("no more points to select...")
+                break
+            argmax_idx = np.argmax(mf_output)
         argmaxes.append(argmax_idx)
         argmax_idx = np.argmax(mf_output)
         delays_coarse.append(argmax_idx*1.0/uprate)

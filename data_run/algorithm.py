@@ -16,15 +16,10 @@ Rules (so it works in parallel):
   * Optional: define PARAMS = dict(...) to pass extra keyword arguments.
 """
 import numpy as np
-import tf_lib.chirplet_ridge as CR
-from tf_lib import if_lib
-from fmcw_aux import construct_fractional_D_with_time
 import scipy
-from scipy.sparse.linalg import lsqr
-from utils import upsample
 from scipy.signal import find_peaks
 from scipy.signal import windows, hilbert
-from scipy.fft import fft, ifft, fftfreq
+from scipy.fft import fft
 import algo.sparse
 import algo.filter
 
@@ -33,6 +28,92 @@ from filters import SignalModel
 
 # Properties of the data go in `meta` (see run.load_data). Optional tuning
 # knobs can go in a PARAMS dict here (passed to process_segment as kwargs).
+
+def estimate_inst_freq(segment, seg_idx, config, return_intermediate=False, prev_result=None):
+    """
+    segment : np.ndarray, shape (L,)   -- array[seg_idx*L : (seg_idx+1)*L]
+    seg_idx : int                      -- which segment this is (0, 1, 2, ...)
+    meta    : dict                     -- parameters of the whole vector
+                                          (from load_data), e.g. meta["fs"]
+    prev_result : dict or None         -- results of a previous run for this
+                                          segment: {key: prev[key][seg_idx]}
+                                          for the dict prev returned by
+                                          load_data; None if prev is None
+
+    Returns whatever you want; outputs are collected in segment order.
+    """
+    """
+    # Example
+    fs = meta["fs"]
+    L = len(segment)
+    t0 = seg_idx * L / fs          # start time of this segment
+
+    # ---- example algorithm: peak frequency of the segment ----
+    w = np.hanning(L) if window == "hann" else np.ones(L)
+    spec = np.abs(np.fft.rfft(segment * w))
+    freqs = np.fft.rfftfreq(L, d=1.0 / fs)
+    return dict(t0=t0, peak_freq=freqs[np.argmax(spec)], peak_mag=spec.max())
+    """
+    del_t = config["del_t"]
+
+    signal_i = segment[:, 0]
+    ref_signal_i = segment[:, 1]
+
+    # 1.1 IF estimation
+    if config["ref_if_est"] == "fcrm":
+
+        ref_ift, ref_ifq = fmcw_aux.estimate_if_fcrm(ref_signal_i, **config["ref_if_est_params"])
+        ref_ift *= del_t
+        ref_ifq /= del_t
+
+    elif config["ref_if_est"] == "hilbert":
+
+        ref_ift, ref_ifq = fmcw_aux.estimate_if_hilbert(ref_signal_i, **config["ref_if_est_params"])
+        ref_ift *= del_t
+        ref_ifq /= del_t
+
+    else:
+        raise ValueError(f"could not recognize {config['if_est']} as if estimation type")
+
+    ref_if_smooth_length = config["ref_if_smooth_length"]
+    if ref_if_smooth_length > 0:
+        ref_ifq = np.pad(ref_ifq, pad_width=(ref_if_smooth_length, ref_if_smooth_length), mode="wrap")
+        ref_ifq = np.convolve(ref_ifq, np.ones((2*ref_if_smooth_length+1,))/(2*ref_if_smooth_length+1), mode="valid")
+
+    # 1.2 (collimator) IF estimation
+    if config["col_if_est"] != "none":
+
+        if config["col_if_est"] == "fcrm":
+
+            col_ift, col_ifq = fmcw_aux.estimate_if_fcrm(signal_i, **config["col_if_est_params"])
+            col_ift *= del_t
+            col_ifq /= del_t
+
+        elif config["col_if_est"] == "hilbert":
+            col_ift, col_ifq = fmcw_aux.estimate_if_hilbert(signal_i, **config["col_if_est_params"])
+            col_ift *= del_t
+            col_ifq /= del_t
+
+        col_if_smooth_length = config["col_if_smooth_length"]
+        if col_if_smooth_length > 0:
+            col_ifq = np.pad(col_ifq, pad_width=(col_if_smooth_length, col_if_smooth_length), mode="wrap")
+            col_ifq = np.convolve(col_ifq, np.ones((2*col_if_smooth_length+1,))/(2*col_if_smooth_length+1), mode="valid")
+
+        if len(col_ifq) == len(ref_ifq):
+            if np.mean((col_ifq+ref_ifq)**2) < np.mean((col_ifq-ref_ifq)**2):
+                col_ifq *= -1
+        else:
+            ifq_resamp = np.interp(col_ift, ref_ift, ref_ifq)
+            if np.mean((col_ifq+ifq_resamp)**2) < np.mean((col_ifq-ifq_resamp)**2):
+                col_ifq *= -1
+
+    result = dict()
+
+    result["ref_if"] = np.column_stack([ref_ift, ref_ifq])
+    if config["col_if_est"] != "none":
+        result["col_if"] = np.column_stack([col_ift, col_ifq])
+
+    return result
 
 def process_segment(segment, seg_idx, config, return_intermediate=False, prev_result=None):
     """
@@ -110,72 +191,56 @@ def process_segment(segment, seg_idx, config, return_intermediate=False, prev_re
         if return_intermediate:
             result["before_after_resample"] = [ signal_i_cbf, signal_i_new ]
 
-    elif config["method"] in ["mf", "bmf", "bp", "bbp"]:
+    elif config["method"] in ["if", "mf", "bmf", "bp", "bbp"]:
 
         uprate = config["uprate"]
 
-        # 1.1 IF estimation
-        if prev_result and ("ref_if" in prev_result.keys()):
-            ref_ift, ref_ifq = prev_result["ref_if"][:,0], prev_result["ref_if"][:, 1]
-            
-        elif config["if_est"] == "fcrm":
-            ref_ift, ref_ifq = fmcw_aux.estimate_if_fcrm(ref_signal_i, **config["fcrm_params"])
-            ref_ift *= del_t
-            ref_ifq /= del_t
-
-        elif config["if_est"] == "hilbert":
-
-            ref_ift, ref_ifq = fmcw_aux.estimate_if_hilbert(ref_signal_i, **config["hilbert_if_params"])
-            ref_ift *= del_t
-            ref_ifq /= del_t
-
+        # 1. IF estimation
+        if prev_result:
+            result = dict()
+            if ("ref_if" in prev_result.keys()):
+                ref_ift, ref_ifq = prev_result["ref_if"][:,0], prev_result["ref_if"][:, 1]
+                ref_if_smooth_length = config["ref_if_smooth_length"]
+                if ref_if_smooth_length > 0:
+                    ref_ifq = np.pad(ref_ifq, pad_width=(ref_if_smooth_length, ref_if_smooth_length), mode="wrap")
+                    ref_ifq = np.convolve(ref_ifq, np.ones((2*ref_if_smooth_length+1,))/(2*ref_if_smooth_length+1), mode="valid")                
+                result["ref_if"] = np.column_stack([ref_ift, ref_ifq])
+            if (config["col_if_est"] != "none") and ("col_if" in prev_result.keys()):
+                col_ift, col_ifq = prev_result["col_if"][:,0], prev_result["col_if"][:, 1]
+                col_if_smooth_length = config["col_if_smooth_length"]
+                if col_if_smooth_length > 0:
+                    col_ifq = np.pad(col_ifq, pad_width=(col_if_smooth_length, col_if_smooth_length), mode="wrap")
+                    col_ifq = np.convolve(col_ifq, np.ones((2*col_if_smooth_length+1,))/(2*col_if_smooth_length+1), mode="valid")                
+                result["col_if"] = np.column_stack([col_ift, col_ifq])
         else:
-            raise ValueError(f"could not recognize {config['if_est']} as if estimation type")
+            result = estimate_inst_freq(segment, seg_idx, config)
+            ref_ift, ref_ifq = result["ref_if"][:,0], result["ref_if"][:, 1]
+            if (config["col_if_est"] != "none") and ("col_if" in result.keys()):
+                col_ift, col_ifq = result["col_if"][:,0], result["col_if"][:, 1]
 
-        if_smooth_length = config["if_smooth_length"]
-        if if_smooth_length > 1:
-            ref_ifq = np.pad(ref_ifq, pad_width=(if_smooth_length, if_smooth_length), mode="wrap")
-            ref_ifq = np.convolve(ref_ifq, np.ones((2*if_smooth_length+1,))/(2*if_smooth_length+1), mode="valid")
-
-        # 1.2 (collimator) IF estimation
-        if config["use_collimator"] or config["subtract_collimator"]:
-
-            if prev_result and ("sig_if" in prev_result.keys()):
-                col_ift, col_ifq = prev_result["sig_if"][:,0], prev_result["sig_if"][:, 1]
-
-            elif config["if_est"] == "fcrm":
-                col_ift, col_ifq = fmcw_aux.estimate_if_fcrm(signal_i, **config["fcrm_params"])
-                col_ift *= del_t
-                col_ifq /= del_t
-
-            elif config["if_est"] == "hilbert":
-                col_ift, col_ifq = fmcw_aux.estimate_if_hilbert(signal_i, **config["hilbert_if_params"])
-                col_ift *= del_t
-                col_ifq /= del_t
-            
-            if np.mean((col_ifq-ref_ifq)**2) > np.mean((col_ifq+ref_ifq)**2):
-                ref_ifq *= -1
-
-            if if_smooth_length > 1:
-                col_ifq = np.pad(col_ifq, pad_width=(if_smooth_length, if_smooth_length), mode="wrap")
-                col_ifq = np.convolve(col_ifq, np.ones((2*if_smooth_length+1,))/(2*if_smooth_length+1), mode="valid")
-
-        # 2. subtracting collimator
-        if config["subtract_collimator"]:
-            signal_i = fmcw_aux.subtract_signal(ts_i, signal_i, col_ift, col_ifq, 200, period=3*T)
-
-        # 3. (trasmitted) IF estimation
-        
+        # 2. (trasmitted) IF estimation
         modufuncsolver = config["modfsolver"]
-        if not config["use_collimator"]:
+        if config["col_if_est"] == "none":
             a_est = modufuncsolver.estimate((ref_ift, ref_ifq*del_t))
         else:
             a_est = modufuncsolver.estimate((ref_ift, ref_ifq*del_t), (col_ift, col_ifq*del_t))
         a_est /= del_t
+
         modf_smooth_length = config["modf_smooth_length"]
         if modf_smooth_length > 1:
             a_est = np.pad(a_est, pad_width=(modf_smooth_length, modf_smooth_length), mode="wrap")
             a_est = np.convolve(a_est, np.ones((2*modf_smooth_length+1,))/(2*modf_smooth_length+1), mode="valid")
+
+        result["modf"] = a_est
+
+        if config["method"] == "if":
+            return result
+
+        # 3. subtracting collimator
+        if config["subtract_collimator"]:
+            if config["col_if_est"] == "none":
+                raise RuntimeError("collimator if must be estimated in order for subtraction")
+            signal_i = fmcw_aux.subtract_signal(ts_i, signal_i, col_ift, col_ifq, 200, period=3*T)
 
         # 4. matched filtering
 
@@ -184,38 +249,27 @@ def process_segment(segment, seg_idx, config, return_intermediate=False, prev_re
 
         if config["method"] == "mf":
 
-            # (mf_delays, mf_peaks), (tmf, mf) = algo.filter.matchedfilter(model, ts_i, y, uprate=uprate,
-            #                                             t_low=dist_min*2/3e8, t_high=dist_max*2/3e8, top_k=10,
-            #                                             distance=10)
-            delays, confidence = algo.filter.matchedfilter(model, ts_i, y, uprate=uprate, **config["mf_params"])
+            delays, confidence = algo.filter.matchedfilter(model, ts_i, y, uprate=uprate, **config["algo_params"])
             confidence /= np.amax(confidence)
 
         elif config["method"] == "bmf":
 
-            delays, confidence = algo.filter.bartlett_matchedfilter(model, ts_i, y, uprate=uprate, **config["bmf_params"])
+            delays, confidence = algo.filter.bartlett_matchedfilter(model, ts_i, y, uprate=uprate, **config["algo_params"])
             confidence /= np.amax(confidence)
 
         elif config["method"] == "bp":
 
-            # bp = algo.sparse.basis_pursuit_faster(model, ts_i, y, uprate=uprate, 
-            #                                     lambd=60, rho=1000, n_iter=1000, tol=3e-7,
-            #                                     t_low=dist_min*2/3e8, t_high=dist_max*2/3e8)
-            bp = algo.sparse.basis_pursuit_faster(model, ts_i, y, uprate=uprate, **config["bp_params"])
+            bp = algo.sparse.basis_pursuit_faster(model, ts_i, y, uprate=uprate, **config["algo_params"])
             confidence = np.abs(bp)
             confidence /= np.amax(confidence)
-            delays = np.arange(len(bp))/uprate*del_t/2*3e8
+            delays = np.arange(len(bp))/uprate*del_t
 
         elif config["method"] == "bbp":
 
-            # bbp = algo.sparse.bartlett_basis_pursuit_faster(model, ts_i, y, uprate=uprate, lambd=30, 
-            #                                                 window_len=1000, stride=500, rho=1000,
-            #                                                 window="blackmanharris", n_iter=1000, tol=3e-7,
-            #                                                 t_low=dist_min*2/3e8, t_high=dist_max*2/3e8)
-            bbp = algo.sparse.bartlett_basis_pursuit_faster(model, ts_i, y, uprate=uprate, **config["bbp_params"])
+            bbp = algo.sparse.bartlett_basis_pursuit_faster(model, ts_i, y, uprate=uprate, **config["algo_params"])
             confidence = np.mean(np.abs(bbp), axis=0)
             confidence /= np.amax(confidence)
-            delays = np.arange(len(bbp))/uprate*del_t/2*3e8
-
+            delays = np.arange(len(confidence))/uprate*del_t
         search_region = (delays>target_min_dist*2/3e8)*(delays<target_max_dist*2/3e8)
         peaks, _ = find_peaks(delays[search_region], confidence[search_region], **config["find_peaks_params"])
         peaks = peaks + np.argmax(search_region)
@@ -227,16 +281,13 @@ def process_segment(segment, seg_idx, config, return_intermediate=False, prev_re
             s = np.pad(s, (0,config["top_k"]-len(a)), mode="constant", constant_values=0)
 
         segment_t = np.mean(ts_i)
-        result = dict(segment_t=segment_t, 
-                distances=d, peak_strength=s)
+        result["segment_t"]=segment_t
+        result["distances"]=d
+        result["peak_strength"]=s
         if return_intermediate:
-            result["crosscorrelation"] = np.column_stack([delays[search_region], confidence[search_region]])
+            result["confidence"] = np.column_stack([delays[search_region], confidence[search_region]])
             if config["subtract_collimator"]:
                 result["subtracted_signal"] = signal_i
-        result["modf_estimate"] = a_est
-        result["if_estimate"] = np.column_stack([ref_ift, ref_ifq])
-        if config["use_collimator"] or config["subtract_collimator"]:
-            result["ifcol_estimate"] = np.column_stack([col_ift, col_ifq])
 
     else:
         raise ValueError(f"did not recongnize {config['method']}")

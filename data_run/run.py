@@ -264,6 +264,8 @@ def load_data(args):
         raise ValueError(f"did not recognized {args.data}")
 
     config["src"] = args.data
+    config["slow_fcrm"] = getattr(args, "slow_fcrm", False)
+    config["numba_fcrm"] = getattr(args, "numba_fcrm", False)
 
     config = get_algo_metadata(config, args)
 
@@ -302,6 +304,12 @@ def main():
     p.add_argument("--ref-if-est", default="hilbert", type=str, help="\"hilbert\" or \"fcrm\"")
     p.add_argument("--col-if-est", default="none", type=str, help="\"none\" or \"hilbert\" or \"fcrm\"")
     p.add_argument("--subtract-collimator", action="store_true", help="subtract collimator")
+    p.add_argument("--slow-fcrm", action="store_true",
+                   help="fmcw_aux.estimate_if_fcrm with fast=False (the original\n"
+                        "chirplet_ridge.estimate_ifs; same result, slower)")
+    p.add_argument("--numba-fcrm", action="store_true",
+                   help="fmcw_aux.estimate_if_fcrm with numba=True (compiled kernels;\n"
+                        "same result, faster than the default fast=True)")
     p.add_argument("--downsample", default=1, type=int)
     p.add_argument("--workers", type=int, default=None,
                    help="default: all CPUs; 1 = serial in this process")
@@ -315,6 +323,8 @@ def main():
     p.add_argument("--out", default=None,
                    help="output .npz (default: results/results_<date>_<time>.npz next to run.py)")
     args = p.parse_args()
+    if args.slow_fcrm and args.numba_fcrm:
+        p.error("--slow-fcrm and --numba-fcrm exclude each other")
 
     x, meta, prev = load_data(args)
 
@@ -326,6 +336,17 @@ def main():
     params = getattr(algorithm, "PARAMS", {})   # optional extra kwargs
     # previous results: window j gets process_segment(..., prev_result={key: prev[key][j]})
     per_window = None if prev is None else dict(prev_result=prev)
+    if (meta.get("numba_fcrm") and "fcrm" in (meta.get("ref_if_est"), meta.get("col_if_est"))
+            and args.workers != 1):
+        # Compile the numba kernels (or load them from their disk cache) here, on
+        # the first window, so that the worker processes only load them instead of
+        # all compiling at once. Errors are left to the run itself to report.
+        try:
+            kw = {} if prev is None else dict(prev_result={k: v[0] for k, v in prev.items()})
+            algorithm.process_segment(x[args.start:args.start + win].copy(), 0, meta,
+                                      **params, **kw)
+        except Exception:
+            pass
     starts, outputs, errors = run_windows(
         x, win, hop, algorithm.process_segment, meta=meta, params=params,
         per_window=per_window,

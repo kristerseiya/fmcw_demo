@@ -62,7 +62,9 @@ def estimate_inst_freq(segment, seg_idx, config, return_intermediate=False, prev
     # 1.1 IF estimation
     if config["ref_if_est"] == "fcrm":
 
-        ref_ift, ref_ifq = fmcw_aux.estimate_if_fcrm(ref_signal_i, **config["ref_if_est_params"])
+        ref_ift, ref_ifq = fmcw_aux.estimate_if_fcrm(ref_signal_i, fast=not config.get("slow_fcrm", False),
+                                                     numba=config.get("numba_fcrm", False),
+                                                     **config["ref_if_est_params"])
         ref_ift *= del_t
         ref_ifq /= del_t
 
@@ -85,7 +87,9 @@ def estimate_inst_freq(segment, seg_idx, config, return_intermediate=False, prev
 
         if config["col_if_est"] == "fcrm":
 
-            col_ift, col_ifq = fmcw_aux.estimate_if_fcrm(signal_i, **config["col_if_est_params"])
+            col_ift, col_ifq = fmcw_aux.estimate_if_fcrm(signal_i, fast=not config.get("slow_fcrm", False),
+                                                         numba=config.get("numba_fcrm", False),
+                                                         **config["col_if_est_params"])
             col_ift *= del_t
             col_ifq /= del_t
 

@@ -86,7 +86,8 @@ meta = get_algo_metadata(meta, args)
 algo_result = process_segment(xi, None, meta, return_intermediate=True, prev_result=if_result)
 bp_delays, bp_confidence = algo_result["confidence"][:,0], algo_result["confidence"][:,1]
 subtracted_signal = algo_result["subtracted_signal"]
-print(algo_result.keys())
+bbp_dists = algo_result["distances"]
+bbp_peaks = algo_result["peak_strength"]
 plt.subplot(121)
 plt.plot(ref_ift, ref_ifq)
 plt.plot(col_ift, col_ifq)
@@ -99,6 +100,9 @@ plt.figure()
 plt.plot(dist_periodogram, periodogram)
 plt.plot(mf_delays*3e8/2, mf_confidence)
 plt.plot(bp_delays*3e8/2, bp_confidence)
+plt.scatter(bbp_dists, bbp_peaks)
+print(bbp_peaks)
+print(bbp_dists)
 
 plt.figure()
 stft_f, stft_t, stft_x = time_freq.short_time_fourier_transform(subtracted_signal, 64, 16, 1/del_t, zero_pad=192)

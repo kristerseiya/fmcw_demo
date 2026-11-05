@@ -271,10 +271,10 @@ def process_segment(segment, seg_idx, config, return_intermediate=False, prev_re
             confidence /= np.amax(confidence)
             delays = np.arange(len(confidence))/uprate*del_t
         search_region = (delays>target_min_dist*2/3e8)*(delays<target_max_dist*2/3e8)
-        peaks, _ = find_peaks(delays[search_region], confidence[search_region], **config["find_peaks_params"])
+        peaks, _ = find_peaks(confidence[search_region], **config["find_peaks_params"])
         peaks = peaks + np.argmax(search_region)
         a = np.argsort(confidence[peaks])[-config["top_k"]:]
-        d = delays[peaks][a]
+        d = (delays*3e8/2)[peaks][a]
         s = confidence[peaks][a]
         if len(a) < config["top_k"]:
             d = np.pad(d, (0,config["top_k"]-len(a)), mode="constant", constant_values=np.nan)

@@ -308,7 +308,7 @@ def load_data(args):
     # ---- write your loading code below ----
     data = np.load(args.path)
 
-    src = str(data["meta_src"])
+    src = str(data["config_src"])
     if src.startswith("0821"):
         f = h5py.File(PATH_TO_0821_GALVO, 'r')
         galvo1 = np.array(f["/channels/channel_4"])

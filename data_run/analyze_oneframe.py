@@ -35,10 +35,10 @@ p.add_argument("--stop", type=int, default=None, help="last row (exclusive)")
 args = p.parse_args()
 
 args.algo = "resample"
-args.min_distance = 0
-args.max_distance = 100
-args.target_min_distance = 0
-args.target_max_distance = 40
+# args.min_distance = 0
+# args.max_distance = 40
+# args.target_min_distance = 21
+# args.target_max_distance = 
 x, meta, _ = load_data(args)
 idx1 = meta["L"] * (args.frame_num) + args.start
 idx2 = meta["L"] * (args.frame_num+3) + args.start
@@ -76,6 +76,8 @@ mf_delays, mf_confidence = algo_result["confidence"][:,0], algo_result["confiden
 subtracted_signal = algo_result["subtracted_signal"]
 print(meta["ref_if_smooth_length"])
 print(meta["col_if_smooth_length"])
+bbp_dists = algo_result["distances"]
+bbp_peaks = algo_result["peak_strength"]
 
 ref_ift, ref_ifq = algo_result["ref_if"][:,0], algo_result["ref_if"][:,1]
 col_ift, col_ifq = algo_result["col_if"][:,0], algo_result["col_if"][:,1]
@@ -86,8 +88,6 @@ meta = get_algo_metadata(meta, args)
 algo_result = process_segment(xi, None, meta, return_intermediate=True, prev_result=if_result)
 bp_delays, bp_confidence = algo_result["confidence"][:,0], algo_result["confidence"][:,1]
 subtracted_signal = algo_result["subtracted_signal"]
-bbp_dists = algo_result["distances"]
-bbp_peaks = algo_result["peak_strength"]
 plt.subplot(121)
 plt.plot(ref_ift, ref_ifq)
 plt.plot(col_ift, col_ifq)

@@ -153,8 +153,8 @@ def process_segment(segment, seg_idx, config, return_intermediate=False, prev_re
 
     signal_i = segment[:, 0]
     ref_signal_i = segment[:, 1]
-    ts_i = segment[:, 2]
-    ts_i = ts_i - ts_i[0]
+    ts_i_ = segment[:, 2]
+    ts_i = ts_i_ - ts_i_[0]
 
     if config["method"] == "resample":
 
@@ -254,25 +254,21 @@ def process_segment(segment, seg_idx, config, return_intermediate=False, prev_re
         if config["method"] == "mf":
 
             delays, confidence = algo.filter.matchedfilter(model, ts_i, y, uprate=uprate, **config["algo_params"])
-            confidence /= np.amax(confidence)
 
         elif config["method"] == "bmf":
 
             delays, confidence = algo.filter.bartlett_matchedfilter(model, ts_i, y, uprate=uprate, **config["algo_params"])
-            confidence /= np.amax(confidence)
 
         elif config["method"] == "bp":
 
             bp = algo.sparse.basis_pursuit_faster(model, ts_i, y, uprate=uprate, **config["algo_params"])
             confidence = np.abs(bp)
-            confidence /= np.amax(confidence)
             delays = np.arange(len(bp))/uprate*del_t
 
         elif config["method"] == "bbp":
 
             bbp = algo.sparse.bartlett_basis_pursuit_faster(model, ts_i, y, uprate=uprate, **config["algo_params"])
             confidence = np.mean(np.abs(bbp), axis=0)
-            confidence /= np.amax(confidence)
             delays = np.arange(len(confidence))/uprate*del_t
         search_region = (delays>target_min_dist*2/3e8)*(delays<target_max_dist*2/3e8)
         peaks, _ = find_peaks(confidence[search_region], **config["find_peaks_params"])
@@ -284,7 +280,7 @@ def process_segment(segment, seg_idx, config, return_intermediate=False, prev_re
             d = np.pad(d, (0,config["top_k"]-len(a)), mode="constant", constant_values=np.nan)
             s = np.pad(s, (0,config["top_k"]-len(a)), mode="constant", constant_values=0)
 
-        segment_t = np.mean(ts_i)
+        segment_t = np.mean(ts_i_)
         result["segment_t"]=segment_t
         result["distances"]=d
         result["peak_strength"]=s
